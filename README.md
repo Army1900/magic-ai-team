@@ -8,7 +8,6 @@ Model-driven Team OS CLI for creating and managing AI agent teams.
 - Team registry management in `OPENTEAM_HOME`
 - Policy/compatibility gates before export
 - Run -> evaluate -> optimize loop
-- Export to `opencode`, `openclaw`, `claude`, `codex`
 - Export to `opencode`, `openclaw`, `claude`, `codex`, `aider`, `continue`, `cline`, `openhands`, `tabby`
 - Provider-centric model management (`current_provider` + `providers.<provider>.models`)
 - Project worklog and progress monitoring (`<project>/.openteam/worklog`)
@@ -179,6 +178,32 @@ openteam export --target codex --out D:\Projects\my-app --strict-target
   - `.openteam/worklog/events.jsonl`
   - `.openteam/worklog/daily/YYYY-MM-DD.md`
   - `.openteam/worklog/summary.json`
+
+## Minimal Export Scenarios (Copy/Paste)
+
+Use one of these after `openteam quickstart` (or `openteam up`) to generate target-ready files:
+
+```bash
+# Aider
+openteam export --target aider --out D:\Projects\my-app --strict-target
+# Output: .aider/aider.team.json + .aider/mcp.json
+
+# Continue
+openteam export --target continue --out D:\Projects\my-app --strict-target
+# Output: .continue/config.yaml + .continue/mcp.json
+
+# Cline
+openteam export --target cline --out D:\Projects\my-app --strict-target
+# Output: .cline/agents.json + .cline/mcp.json
+
+# OpenHands
+openteam export --target openhands --out D:\Projects\my-app --strict-target
+# Output: .openhands/workflow.json + .openhands/mcp.json
+
+# Tabby
+openteam export --target tabby --out D:\Projects\my-app --strict-target
+# Output: .tabby/tabby.team.json + .tabby/mcp.json
+```
 
 ## Monitor Team Progress
 
