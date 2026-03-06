@@ -5,6 +5,8 @@ import { error, info, kv, status } from "../core/ui";
 import { getWorklogPaths, parseSinceToMs, readWorklogEvents, WorklogEvent } from "../core/worklog";
 import { readProgressTemplate, renderProgressReport } from "../core/progress-template";
 import { ensureDir } from "../core/config";
+import { loadTeamConfig } from "../core/config";
+import { TeamConfig } from "../core/types";
 
 function resolveProject(input?: string): string {
   return path.resolve(input ?? process.cwd());
@@ -31,6 +33,68 @@ function compactStatusSummary(input: { ok: number; warn: number; fail: number; c
 function defaultReportPath(project: string): string {
   const day = new Date().toISOString().slice(0, 10);
   return path.resolve(project, ".openteam", "worklog", "reports", `progress-${day}.md`);
+}
+
+function toRiskLevel(team: TeamConfig | null, events: WorklogEvent[]): string {
+  if (!team) {
+    const fails = events.filter((e) => e.status === "fail").length;
+    const warns = events.filter((e) => e.status === "warn").length;
+    if (fails > 0) return "high";
+    if (warns > 0) return "medium";
+    return "low";
+  }
+  const hasHighAgent = team.execution_plane.agents.some((a) => (a.risk_level ?? "low") === "high");
+  const hasHighSkill = team.resources.skills.some((s) => (s.risk_level ?? "low") === "high");
+  const hasHighMcp = team.resources.mcps.some((m) => (m.risk_level ?? "low") === "high");
+  if (hasHighAgent || hasHighSkill || hasHighMcp) return "high";
+  const hasMediumAgent = team.execution_plane.agents.some((a) => (a.risk_level ?? "low") === "medium");
+  const hasMediumSkill = team.resources.skills.some((s) => (s.risk_level ?? "low") === "medium");
+  const hasMediumMcp = team.resources.mcps.some((m) => (m.risk_level ?? "low") === "medium");
+  if (hasMediumAgent || hasMediumSkill || hasMediumMcp) return "medium";
+  return "low";
+}
+
+function loadTeamFromProjectManifest(project: string): TeamConfig | null {
+  const manifest = path.resolve(project, ".openteam-export", "manifest.json");
+  if (!fs.existsSync(manifest)) {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(fs.readFileSync(manifest, "utf8")) as { team_file?: string };
+    if (!payload.team_file) {
+      return null;
+    }
+    return loadTeamConfig(payload.team_file);
+  } catch {
+    return null;
+  }
+}
+
+function parseVars(input: unknown): Record<string, string> {
+  const raw = Array.isArray(input) ? input.map(String) : input ? [String(input)] : [];
+  const out: Record<string, string> = {};
+  for (const item of raw) {
+    const idx = item.indexOf("=");
+    if (idx <= 0) continue;
+    const key = item.slice(0, idx).trim();
+    const value = item.slice(idx + 1).trim();
+    if (!key) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function readVarsFile(filePath: string): Record<string, string> {
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, "utf8")) as Record<string, unknown>;
+    const vars: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      vars[k] = String(v);
+    }
+    return vars;
+  } catch {
+    return {};
+  }
 }
 
 export function registerMonitorCommand(program: Command): void {
@@ -115,6 +179,8 @@ export function registerMonitorCommand(program: Command): void {
     .option("--since <window>", "time window like 24h|7d|30m", "24h")
     .option("--md", "render markdown report from editable template", false)
     .option("--write [path]", "write markdown report to path (default: project .openteam/worklog/reports)", false)
+    .option("--var <key=value>", "custom placeholder value (repeatable)", [])
+    .option("--vars-file <path>", "json file with custom placeholders")
     .option("--json", "json output mode", false)
     .action((options) => {
       const project = resolveProject(options.project);
@@ -191,7 +257,29 @@ export function registerMonitorCommand(program: Command): void {
               Object.entries(types).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "n/a"
             }.`;
       const statusSummary = compactStatusSummary(totals);
+      const teamConfig = loadTeamFromProjectManifest(project);
+      const kpiSummary = teamConfig
+        ? toBulletList(
+            teamConfig.team.kpis.map((k) => `${k.name}: ${k.target}`),
+            "No KPI defined."
+          )
+        : "- No team export manifest found. Run `openteam export` to attach team KPIs.";
+      const blockersOwner = toBulletList(
+        events
+          .filter((e) => e.status === "fail" || e.status === "warn")
+          .slice(-8)
+          .map((e) => {
+            const owner = e.agent ?? "unassigned";
+            const text = e.task ?? e.note ?? e.type;
+            return `${owner}: ${text}`;
+          }),
+        "No active blocker owner."
+      );
+      const riskLevel = toRiskLevel(teamConfig, events);
       const template = readProgressTemplate(project);
+      const cliVars = parseVars(options.var);
+      const fileVars = options.varsFile ? readVarsFile(path.resolve(String(options.varsFile))) : {};
+      const extraVars = { ...fileVars, ...cliVars };
       const markdown = renderProgressReport(template, {
         generated_at: new Date().toISOString(),
         project,
@@ -201,10 +289,13 @@ export function registerMonitorCommand(program: Command): void {
         status_summary: statusSummary,
         type_breakdown: typeBreakdown,
         overall_plan: overallPlan,
+        kpi_summary: kpiSummary,
+        risk_level: riskLevel,
+        blockers_owner: blockersOwner,
         agent_completed: completed,
         progress: progressText,
         todo
-      });
+      }, extraVars);
 
       if (options.md || options.write) {
         info(markdown);
@@ -218,6 +309,9 @@ export function registerMonitorCommand(program: Command): void {
         fs.writeFileSync(outPath, markdown, "utf8");
         kv("report_file", outPath);
         info("Template path: .openteam/templates/progress-report.md");
+        if (Object.keys(extraVars).length > 0) {
+          info(`Applied custom placeholders: ${Object.keys(extraVars).join(", ")}`);
+        }
       }
 
       kv("project", project);

@@ -241,6 +241,8 @@ openteam monitor tail --project D:\Projects\my-app -n 30
 openteam monitor report --project D:\Projects\my-app --since 24h
 openteam monitor report --project D:\Projects\my-app --since 24h --md
 openteam monitor report --project D:\Projects\my-app --since 24h --write
+openteam monitor report --project D:\Projects\my-app --since 24h --md --var kpi_owner="Ops Team"
+openteam monitor report --project D:\Projects\my-app --since 24h --write --vars-file .openteam/templates/progress.vars.json
 ```
 
 Command notes:
@@ -249,7 +251,13 @@ Command notes:
 - `monitor report`: Show metrics for a time window (for example `24h`, `7d`).
 - `monitor report --md`: Render a markdown progress report from editable template.
 - `monitor report --write [path]`: Write markdown report to file (default path under `.openteam/worklog/reports`).
+- `monitor report --var key=value`: Inject custom placeholder values (repeatable).
+- `monitor report --vars-file <json>`: Load custom placeholder values from JSON file.
 - Edit template: `.openteam/templates/progress-report.md`.
+
+Template placeholders:
+- built-in: `{{generated_at}}`, `{{project}}`, `{{since}}`, `{{team}}`, `{{total_events}}`, `{{status_summary}}`, `{{type_breakdown}}`, `{{overall_plan}}`, `{{kpi_summary}}`, `{{risk_level}}`, `{{blockers_owner}}`, `{{agent_completed}}`, `{{progress}}`, `{{todo}}`
+- custom: any `{{your_key}}` provided via `--var your_key=value` or `--vars-file`
 
 ## Command Defaults (Important)
 

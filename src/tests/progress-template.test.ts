@@ -6,7 +6,8 @@ import {
   ensureProgressTemplate,
   getProgressTemplatePath,
   readProgressTemplate,
-  renderProgressReport
+  renderProgressReport,
+  renderWithPlaceholders
 } from "../core/progress-template";
 
 function run(name: string, fn: () => void): void {
@@ -54,6 +55,9 @@ run("renderProgressReport replaces placeholders", () => {
     status_summary: "ok=1",
     type_breakdown: "- run: 1",
     overall_plan: "- step",
+    kpi_summary: "- KPI",
+    risk_level: "low",
+    blockers_owner: "- none",
     agent_completed: "- done",
     progress: "moving",
     todo: "- next"
@@ -68,3 +72,17 @@ run("readProgressTemplate returns template content", () => {
   });
 });
 
+run("renderWithPlaceholders supports custom placeholders", () => {
+  const rendered = renderWithPlaceholders("KPI={{kpi_summary}} Risk={{risk_level}}", {
+    kpi_summary: "NPS +10",
+    risk_level: "medium"
+  });
+  assert.equal(rendered, "KPI=NPS +10 Risk=medium");
+});
+
+run("renderWithPlaceholders keeps unknown placeholders unchanged", () => {
+  const rendered = renderWithPlaceholders("{{unknown_key}}", {
+    team: "A"
+  });
+  assert.equal(rendered, "{{unknown_key}}");
+});
