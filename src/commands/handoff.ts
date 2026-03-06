@@ -3,15 +3,12 @@ import { loadTeamConfig } from "../core/config";
 import { resolveTeamFileOrThrow } from "../core/current-team";
 import { appendWorklogEvent } from "../core/worklog";
 import { banner, error, info, kv, success } from "../core/ui";
-import { buildHandoffPackage, isExportTarget, readLastExportTarget, writeHandoffPackage } from "../core/handoff";
-import { ExportTarget } from "../core/exporters";
+import { buildHandoffPackage, readLastExportTarget, writeHandoffPackage } from "../core/handoff";
+import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
 
 function resolveTarget(projectPath: string, target?: string): ExportTarget {
   if (target) {
-    if (!isExportTarget(target)) {
-      throw new Error("Unsupported target. Use one of: opencode, openclaw, claude, codex, aider, continue, cline, openhands, tabby");
-    }
-    return target;
+    return normalizeExportTarget(target);
   }
   const detected = readLastExportTarget(projectPath);
   return detected ?? "claude";
@@ -24,7 +21,7 @@ export function registerHandoffCommand(program: Command): void {
     .option("--team <nameOrSlug>", "team from registry (default: current team)")
     .option("--file <path>", "explicit team.yaml path (overrides --team)")
     .option("--project <path>", "project path", ".")
-    .option("--target <target>", "opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby")
+    .option("--target <target>", EXPORT_TARGET_HELP)
     .option("--json", "json output mode", false)
     .action((options) => {
       try {
@@ -81,4 +78,3 @@ export function registerHandoffCommand(program: Command): void {
       }
     });
 }
-

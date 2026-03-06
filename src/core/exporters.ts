@@ -3,17 +3,7 @@ import path from "node:path";
 import { ensureDir, writeYamlFile } from "./config";
 import { TeamConfig } from "./types";
 import { appendWorklogEvent, ensureProjectWorklog } from "./worklog";
-
-export type ExportTarget =
-  | "opencode"
-  | "openclaw"
-  | "claude"
-  | "codex"
-  | "aider"
-  | "continue"
-  | "cline"
-  | "openhands"
-  | "tabby";
+import { ExportTarget } from "./targets";
 
 export interface ExportResult {
   target: ExportTarget;

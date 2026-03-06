@@ -1,45 +1,23 @@
 import { Command } from "commander";
 import { loadTeamConfig } from "../core/config";
-import { exportTeam, ExportTarget, validateExportResult, writeExportManifest } from "../core/exporters";
+import { exportTeam, validateExportResult, writeExportManifest } from "../core/exporters";
 import { banner, error, info, kv, status, success } from "../core/ui";
 import { evaluatePolicies } from "../core/policy";
 import { checkTargetCompatibility } from "../core/compatibility";
 import { resolveTeamFileOrThrow } from "../core/current-team";
 import { resolveManagementModel } from "../core/management-models";
 import { invokeModel } from "../core/model-providers";
+import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
 
 function resolveTeamFileFromOptions(options: { team?: string; file?: string }): string {
   return resolveTeamFileOrThrow(options);
-}
-
-function normalizeTarget(value: string): ExportTarget {
-  const lowered = value.toLowerCase();
-  if (
-    lowered === "opencode" ||
-    lowered === "openclaw" ||
-    lowered === "claude" ||
-    lowered === "codex" ||
-    lowered === "aider" ||
-    lowered === "continue" ||
-    lowered === "cline" ||
-    lowered === "openhands" ||
-    lowered === "tabby"
-  ) {
-    return lowered;
-  }
-  throw new Error(
-    "Unsupported target. Use one of: opencode, openclaw, claude, codex, aider, continue, cline, openhands, tabby"
-  );
 }
 
 export function registerExportCommand(program: Command): void {
   program
     .command("export")
     .description("Export team config to framework-specific project config")
-    .requiredOption(
-      "--target <target>",
-      "opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby"
-    )
+    .requiredOption("--target <target>", EXPORT_TARGET_HELP)
     .requiredOption("--out <path>", "project output path")
     .option("--team <nameOrSlug>", "team from registry (default: current team)")
     .option("--file <path>", "explicit team.yaml path (overrides --team)")
@@ -52,7 +30,7 @@ export function registerExportCommand(program: Command): void {
     .action(async (options) => {
       try {
         const teamFile = resolveTeamFileFromOptions(options);
-        const target = normalizeTarget(options.target);
+        const target = normalizeExportTarget(options.target);
         const team = loadTeamConfig(teamFile);
 
         const strict = Boolean(options.strict);

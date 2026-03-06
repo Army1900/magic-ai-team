@@ -1,5 +1,5 @@
 import { TeamConfig } from "./types";
-import { ExportTarget } from "./exporters";
+import { ExportTarget } from "./targets";
 
 export interface CompatibilityFinding {
   severity: "warn" | "fail";

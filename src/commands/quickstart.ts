@@ -1,30 +1,11 @@
 import { Command } from "commander";
 import { loadTeamConfig } from "../core/config";
 import { checkTargetCompatibility } from "../core/compatibility";
-import { exportTeam, ExportTarget, writeExportManifest } from "../core/exporters";
+import { exportTeam, writeExportManifest } from "../core/exporters";
 import { evaluatePolicies } from "../core/policy";
 import { banner, error, info, kv, status, success } from "../core/ui";
 import { runUpFlow } from "./up";
-
-function normalizeTarget(target: string): ExportTarget {
-  const lowered = target.toLowerCase();
-  if (
-    lowered === "opencode" ||
-    lowered === "openclaw" ||
-    lowered === "claude" ||
-    lowered === "codex" ||
-    lowered === "aider" ||
-    lowered === "continue" ||
-    lowered === "cline" ||
-    lowered === "openhands" ||
-    lowered === "tabby"
-  ) {
-    return lowered;
-  }
-  throw new Error(
-    "Unsupported target. Use one of: opencode, openclaw, claude, codex, aider, continue, cline, openhands, tabby"
-  );
-}
+import { EXPORT_TARGET_HELP, normalizeExportTarget } from "../core/targets";
 
 export function registerQuickstartCommand(program: Command): void {
   program
@@ -32,7 +13,7 @@ export function registerQuickstartCommand(program: Command): void {
     .description("Beginner one-command flow: guided setup + optional export")
     .option("--name <name>", "team name")
     .option("--goal <goal>", "team goal")
-    .option("--target <target>", "opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby", "claude")
+    .option("--target <target>", EXPORT_TARGET_HELP, "claude")
     .option("--out <path>", "project path for auto export")
     .option("--non-interactive", "use defaults/arguments without guided questions", false)
     .option("--task <text>", "sample task", "Draft an initial delivery plan")
@@ -53,7 +34,7 @@ export function registerQuickstartCommand(program: Command): void {
       }
 
       try {
-        const target = normalizeTarget(options.target ?? upResult.target ?? "claude");
+        const target = normalizeExportTarget(options.target ?? upResult.target ?? "claude");
         const strict = Boolean(options.strict);
         const team = loadTeamConfig(upResult.team_file);
 

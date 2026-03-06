@@ -14,17 +14,9 @@ import { banner, error, info, kv, status, success } from "../core/ui";
 import { resolveManagementModel } from "../core/management-models";
 import { canInvokeLive, invokeModel } from "../core/model-providers";
 import { loadMethodologyGuidance } from "../core/methodology";
+import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
 
-type Target =
-  | "opencode"
-  | "openclaw"
-  | "claude"
-  | "codex"
-  | "aider"
-  | "continue"
-  | "cline"
-  | "openhands"
-  | "tabby";
+type Target = ExportTarget;
 type Priority = "quality" | "speed" | "cost" | "balanced";
 type HumanLoop = "low" | "medium" | "high";
 
@@ -57,23 +49,7 @@ export interface UpFlowResult {
 }
 
 function normalizeTarget(target: string): Target {
-  const lowered = target.toLowerCase();
-  if (
-    lowered === "opencode" ||
-    lowered === "openclaw" ||
-    lowered === "claude" ||
-    lowered === "codex" ||
-    lowered === "aider" ||
-    lowered === "continue" ||
-    lowered === "cline" ||
-    lowered === "openhands" ||
-    lowered === "tabby"
-  ) {
-    return lowered;
-  }
-  throw new Error(
-    "Unsupported target. Use one of: opencode, openclaw, claude, codex, aider, continue, cline, openhands, tabby"
-  );
+  return normalizeExportTarget(target);
 }
 
 function normalizePriority(value: string): Priority {
@@ -428,7 +404,7 @@ export function registerUpCommand(program: Command): void {
     .description("Guided bootstrap flow: requirement dialog -> team setup -> validate -> policy -> simulate -> evaluate")
     .option("--name <name>", "team name")
     .option("--goal <goal>", "team goal")
-    .option("--target <target>", "opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby")
+    .option("--target <target>", EXPORT_TARGET_HELP)
     .option("--non-interactive", "use defaults/arguments without guided questions", false)
     .option("--task <text>", "sample task", "Draft an initial delivery plan")
     .option("--strict", "block on warnings in policy/compatibility", false)

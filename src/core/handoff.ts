@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ensureDir } from "./config";
 import { TeamConfig } from "./types";
-import { ExportTarget } from "./exporters";
+import { ExportTarget, isExportTarget } from "./targets";
 
 export interface HandoffPackage {
   target: ExportTarget;
@@ -19,21 +19,6 @@ export interface HandoffPaths {
   brief: string;
   prompt: string;
   meta: string;
-}
-
-export function isExportTarget(value: string): value is ExportTarget {
-  const lowered = value.toLowerCase();
-  return (
-    lowered === "opencode" ||
-    lowered === "openclaw" ||
-    lowered === "claude" ||
-    lowered === "codex" ||
-    lowered === "aider" ||
-    lowered === "continue" ||
-    lowered === "cline" ||
-    lowered === "openhands" ||
-    lowered === "tabby"
-  );
 }
 
 export function readLastExportTarget(projectPath: string): ExportTarget | null {
@@ -140,4 +125,3 @@ export function writeHandoffPackage(projectPath: string, handoff: HandoffPackage
     meta
   };
 }
-
