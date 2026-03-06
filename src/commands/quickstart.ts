@@ -11,7 +11,7 @@ import { assessGateFindings } from "../core/gates";
 export function registerQuickstartCommand(program: Command): void {
   program
     .command("quickstart")
-    .description("Beginner one-command flow: guided setup + optional export")
+    .description("Legacy guided flow: setup + optional export")
     .option("--name <name>", "team name")
     .option("--goal <goal>", "team goal")
     .option("--target <target>", EXPORT_TARGET_HELP, "claude")

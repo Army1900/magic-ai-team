@@ -35,18 +35,14 @@ npx openteam --help
 ## 3-Minute Quick Start
 
 ```bash
-openteam quickstart
 openteam go --project D:\Projects\my-app --target claude
-openteam status
-openteam export --target claude --out D:\Projects\my-app
-openteam handoff --project D:\Projects\my-app
-openteam start --project D:\Projects\my-app
 openteam monitor status --project D:\Projects\my-app
 ```
 
-`openteam quickstart` / `openteam up` are guided (multi-step Q&A):
-- problem / outcome / constraints are template-first (with custom input fallback)
-- target / priority / human-loop are choice-based
+Beginner default:
+- `go` is the primary entrypoint for non-technical users.
+- It orchestrates `up -> export -> handoff -> start`.
+- Use `--no-start` if you only want setup artifacts.
 
 ## Default Workspace (`OPENTEAM_HOME`)
 
@@ -93,6 +89,10 @@ Command notes:
 openteam go --project D:\Projects\my-app --target claude
 openteam go --project D:\Projects\my-app --target claude --non-interactive --yes
 openteam go --project D:\Projects\my-app --target claude --no-start
+openteam go --project D:\Projects\my-app --target claude --json
+openteam launcher check
+openteam launcher check --target claude
+openteam launcher check --target claude --json
 
 openteam quickstart
 openteam quickstart --target claude --out D:\Projects\my-app
@@ -110,6 +110,10 @@ Flow in `up`:
 - simulate one task
 - evaluate report
 - compatibility check for selected target
+
+`go` notes:
+- includes launcher precheck signal for the selected target
+- in `--json` mode output is machine-readable only (no extra text)
 
 ### 2) Status / Validation
 
@@ -399,8 +403,8 @@ openteam create mcp --from-api "https://api.example.com/openapi.json" --attach
 
 ## Command Cheatsheet
 
-- `quickstart`: Beginner entrypoint; guided team setup with optional export.
-- `go`: One-command orchestrator (`up -> export -> handoff -> start`), best for non-technical users.
+- `go`: Default beginner entrypoint; one-command orchestrator (`up -> export -> handoff -> start`).
+- `quickstart`: Legacy guided setup + optional export (still supported).
 - `up`: Guided setup only (no automatic export); more flexible than quickstart.
 - `team`: Registry operations (create/select/show teams).
 - `status`: Show current team operational summary.
@@ -413,6 +417,7 @@ openteam create mcp --from-api "https://api.example.com/openapi.json" --attach
 - `export`: Export to `opencode/openclaw/claude/codex/aider/continue/cline/openhands/tabby` and initialize project worklog.
 - `handoff`: Generate a team handoff package in project `.openteam/handoff`.
 - `start`: Launch target tool with handoff context; optional `--run` for one-shot start.
+- `launcher`: Check local launcher command availability for one or all targets.
 - `monitor`: Read project `.openteam/worklog` progress and metrics.
 - `provider`: Inspect and test provider auth/connectivity.
 - `policy`: Inspect/enforce policy gates (`risk`, `trust`, `approval`).

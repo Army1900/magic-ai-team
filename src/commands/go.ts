@@ -10,7 +10,7 @@ import { exportTeam, validateExportResult, writeExportManifest } from "../core/e
 import { appendWorklogEvent } from "../core/worklog";
 import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP, normalizeExportTarget } from "../core/targets";
-import { commandExists, launchTool, resolveToolSpec } from "../core/launchers";
+import { commandExists, getLauncherHealth, launchTool, resolveToolSpec } from "../core/launchers";
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
 import { reportCommandFailure, toErrorMessage } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
@@ -65,6 +65,14 @@ export function registerGoCommand(program: Command): void {
         const strict = Boolean(options.strict);
         const strictTarget = Boolean(options.strictTarget);
         const team = loadTeamConfig(upResult.team_file);
+        const shouldStart = Boolean(options.start);
+        const preflight = shouldStart
+          ? getLauncherHealth(target, options.toolCmd ? String(options.toolCmd) : undefined)
+          : null;
+        if (preflight && !preflight.available && !options.json) {
+          warn(`Launcher precheck: command not found for ${target} -> ${preflight.command}`);
+          info("Start phase may be skipped unless you install the tool or pass --tool-cmd.");
+        }
 
         const policy = evaluatePolicies(team);
         const policyGate = assessGateFindings(policy.findings, strict);
@@ -159,7 +167,6 @@ export function registerGoCommand(program: Command): void {
 
         let started = false;
         let startExitCode: number | null = null;
-        const shouldStart = Boolean(options.start);
         if (shouldStart) {
           const toolSpec = resolveToolSpec(target, options.toolCmd ? String(options.toolCmd) : undefined);
           if (!options.yes) {
@@ -224,6 +231,7 @@ export function registerGoCommand(program: Command): void {
           team_file: upResult.team_file,
           target,
           project: projectPath,
+          launcher: preflight,
           manifest,
           handoff_paths: handoffPaths,
           started,

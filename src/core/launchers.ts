@@ -1,5 +1,5 @@
 import { spawnSync, SpawnSyncReturns } from "node:child_process";
-import { ExportTarget, getDefaultToolCommand } from "./targets";
+import { EXPORT_TARGETS, ExportTarget, getDefaultToolCommand } from "./targets";
 
 export interface ToolSpec {
   command: string;
@@ -9,6 +9,14 @@ export interface ToolSpec {
 export interface LaunchAdapter {
   target: ExportTarget;
   command: string;
+  supports_stdin_run: boolean;
+}
+
+export interface LauncherHealth {
+  target: ExportTarget;
+  command: string;
+  args: string[];
+  available: boolean;
   supports_stdin_run: boolean;
 }
 
@@ -70,3 +78,18 @@ export function launchTool(
   });
 }
 
+export function getLauncherHealth(target: ExportTarget, overrideCmd?: string): LauncherHealth {
+  const adapter = getLaunchAdapter(target);
+  const tool = resolveToolSpec(target, overrideCmd);
+  return {
+    target,
+    command: tool.command,
+    args: tool.args,
+    available: commandExists(tool.command),
+    supports_stdin_run: adapter.supports_stdin_run
+  };
+}
+
+export function listLauncherHealth(): LauncherHealth[] {
+  return EXPORT_TARGETS.map((target) => getLauncherHealth(target));
+}

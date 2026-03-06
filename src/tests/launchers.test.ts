@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { EXPORT_TARGETS } from "../core/targets";
-import { getLaunchAdapter, parseToolCommand, resolveToolSpec } from "../core/launchers";
+import { getLaunchAdapter, getLauncherHealth, listLauncherHealth, parseToolCommand, resolveToolSpec } from "../core/launchers";
 
 function run(name: string, fn: () => void): void {
   try {
@@ -42,3 +42,14 @@ run("resolveToolSpec returns adapter default by target", () => {
   assert.deepEqual(tool.args, []);
 });
 
+run("getLauncherHealth returns shape for one target", () => {
+  const row = getLauncherHealth("claude");
+  assert.equal(row.target, "claude");
+  assert.equal(typeof row.available, "boolean");
+  assert.equal(row.command.length > 0, true);
+});
+
+run("listLauncherHealth returns one row per target", () => {
+  const rows = listLauncherHealth();
+  assert.equal(rows.length, EXPORT_TARGETS.length);
+});
