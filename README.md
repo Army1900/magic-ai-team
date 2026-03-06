@@ -121,12 +121,14 @@ Flow in `up`:
 openteam status
 openteam validate
 openteam doctor
+openteam doctor --target claude
 ```
 
 Command notes:
 - `status`: Show team health, model setup, policy status, and latest artifacts.
 - `validate`: Validate the team config schema.
 - `doctor`: Run environment/config checks (keys, provider, schema).
+- `doctor --target <target>`: Also check target compatibility and launcher availability.
 
 ### 3) Run / Evaluate / Optimize
 
@@ -182,6 +184,10 @@ openteam start --project D:\Projects\my-app --run --yes
 # Override launch command if needed
 openteam start --project D:\Projects\my-app --tool-cmd "claude"
 ```
+
+`--run` note:
+- Supported for `opencode/openclaw/claude/codex/aider` via stdin prompt injection.
+- For `continue/cline/openhands/tabby`, use `start` without `--run` and execute prompt manually in that tool.
 
 ## Export Output
 

@@ -2,6 +2,9 @@ import path from "node:path";
 import { fileExists, loadOpenTeamConfig, loadTeamConfig } from "./config";
 import { validateTeamConfig } from "./validate";
 import { describeProviderAuth } from "./model-providers";
+import { ExportTarget, normalizeExportTarget } from "./targets";
+import { checkTargetCompatibility } from "./compatibility";
+import { getLauncherHealth } from "./launchers";
 
 export interface DoctorCheck {
   name: string;
@@ -13,7 +16,7 @@ function providerFromModel(model: string): string {
   return model.split(":")[0] ?? "";
 }
 
-export function runDoctor(teamPath = "team.yaml", openTeamPath = "openteam.yaml"): DoctorCheck[] {
+export function runDoctor(teamPath = "team.yaml", openTeamPath = "openteam.yaml", target?: string): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
 
   checks.push({
@@ -68,6 +71,48 @@ export function runDoctor(teamPath = "team.yaml", openTeamPath = "openteam.yaml"
         name: `provider env (${provider})`,
         status: auth.ok ? "ok" : "warn",
         detail: auth.detail
+      });
+    }
+
+    if (target) {
+      let normalized: ExportTarget;
+      try {
+        normalized = normalizeExportTarget(target);
+      } catch (error) {
+        checks.push({
+          name: "target option",
+          status: "fail",
+          detail: error instanceof Error ? error.message : String(error)
+        });
+        return checks;
+      }
+
+      const compat = checkTargetCompatibility(teamConfig, normalized);
+      const fails = compat.findings.filter((f) => f.severity === "fail");
+      const warns = compat.findings.filter((f) => f.severity === "warn");
+      checks.push({
+        name: `target compatibility (${normalized})`,
+        status: fails.length > 0 ? "fail" : warns.length > 0 ? "warn" : "ok",
+        detail:
+          fails.length > 0
+            ? `${fails.length} fail, ${warns.length} warn`
+            : warns.length > 0
+            ? `${warns.length} warn`
+            : "compatible"
+      });
+
+      const launcher = getLauncherHealth(normalized);
+      checks.push({
+        name: `launcher (${normalized})`,
+        status: launcher.available ? "ok" : "warn",
+        detail: launcher.available ? `${launcher.command} found` : `${launcher.command} missing`
+      });
+      checks.push({
+        name: `run-mode support (${normalized})`,
+        status: launcher.supports_stdin_run ? "ok" : "warn",
+        detail: launcher.supports_stdin_run
+          ? "supports --run stdin injection"
+          : "does not support --run stdin injection"
       });
     }
   } catch (error) {

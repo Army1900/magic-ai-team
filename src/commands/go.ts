@@ -10,7 +10,7 @@ import { exportTeam, validateExportResult, writeExportManifest } from "../core/e
 import { appendWorklogEvent } from "../core/worklog";
 import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP, normalizeExportTarget } from "../core/targets";
-import { commandExists, getLauncherHealth, launchTool, resolveToolSpec } from "../core/launchers";
+import { assertRunModeSupported, commandExists, getLauncherHealth, launchTool, resolveToolSpec } from "../core/launchers";
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
 import { reportCommandFailure, toErrorMessage } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
@@ -66,6 +66,7 @@ export function registerGoCommand(program: Command): void {
         const strictTarget = Boolean(options.strictTarget);
         const team = loadTeamConfig(upResult.team_file);
         const shouldStart = Boolean(options.start);
+        assertRunModeSupported(target, Boolean(options.run));
         const preflight = shouldStart
           ? getLauncherHealth(target, options.toolCmd ? String(options.toolCmd) : undefined)
           : null;

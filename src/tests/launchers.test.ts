@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { EXPORT_TARGETS } from "../core/targets";
-import { getLaunchAdapter, getLauncherHealth, listLauncherHealth, parseToolCommand, resolveToolSpec } from "../core/launchers";
+import {
+  assertRunModeSupported,
+  getLaunchAdapter,
+  getLauncherHealth,
+  listLauncherHealth,
+  parseToolCommand,
+  resolveToolSpec
+} from "../core/launchers";
 
 function run(name: string, fn: () => void): void {
   try {
@@ -52,4 +59,12 @@ run("getLauncherHealth returns shape for one target", () => {
 run("listLauncherHealth returns one row per target", () => {
   const rows = listLauncherHealth();
   assert.equal(rows.length, EXPORT_TARGETS.length);
+});
+
+run("assertRunModeSupported allows run mode for claude", () => {
+  assert.doesNotThrow(() => assertRunModeSupported("claude", true));
+});
+
+run("assertRunModeSupported blocks run mode for continue", () => {
+  assert.throws(() => assertRunModeSupported("continue", true), /does not support stdin run injection/);
 });

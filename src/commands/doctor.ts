@@ -10,11 +10,12 @@ export function registerDoctorCommand(program: Command): void {
     .option("-f, --file <path>", "team config path (overrides --team/current)")
     .option("--team <nameOrSlug>", "team from registry (default: current team)")
     .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("--target <target>", "optional target diagnostics (launcher + compatibility)")
     .action((options) => {
       try {
         const teamFile = resolveTeamFileOrThrow({ file: options.file, team: options.team });
         banner("Doctor", "Environment and config health checks");
-        const checks = runDoctor(teamFile, options.config);
+        const checks = runDoctor(teamFile, options.config, options.target ? String(options.target) : undefined);
         let hasFail = false;
         for (const check of checks) {
           status(check.status, check.name, check.detail);

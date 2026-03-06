@@ -7,7 +7,7 @@ import { appendWorklogEvent } from "../core/worklog";
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
 import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP } from "../core/targets";
-import { commandExists, launchTool, resolveToolSpec } from "../core/launchers";
+import { assertRunModeSupported, commandExists, launchTool, resolveToolSpec } from "../core/launchers";
 import { resolveProjectTarget } from "../core/project-target";
 import { reportCommandFailure } from "../core/command-errors";
 import { successPayload, toJsonString } from "../core/json-output";
@@ -37,6 +37,7 @@ export function registerStartCommand(program: Command): void {
         const teamFile = resolveTeamFileOrThrow(options);
         const projectPath = String(options.project ?? ".");
         const target = resolveProjectTarget(projectPath, options.target);
+        assertRunModeSupported(target, Boolean(options.run));
         const team = loadTeamConfig(teamFile);
         const handoff = buildHandoffPackage(team, target);
         const paths = writeHandoffPackage(projectPath, handoff);

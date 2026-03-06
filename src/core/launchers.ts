@@ -26,10 +26,10 @@ const ADAPTERS: Record<ExportTarget, LaunchAdapter> = {
   claude: { target: "claude", command: "claude", supports_stdin_run: true },
   codex: { target: "codex", command: "codex", supports_stdin_run: true },
   aider: { target: "aider", command: "aider", supports_stdin_run: true },
-  continue: { target: "continue", command: "continue", supports_stdin_run: true },
-  cline: { target: "cline", command: "cline", supports_stdin_run: true },
-  openhands: { target: "openhands", command: "openhands", supports_stdin_run: true },
-  tabby: { target: "tabby", command: "tabby", supports_stdin_run: true }
+  continue: { target: "continue", command: "continue", supports_stdin_run: false },
+  cline: { target: "cline", command: "cline", supports_stdin_run: false },
+  openhands: { target: "openhands", command: "openhands", supports_stdin_run: false },
+  tabby: { target: "tabby", command: "tabby", supports_stdin_run: false }
 };
 
 export function getLaunchAdapter(target: ExportTarget): LaunchAdapter {
@@ -92,4 +92,16 @@ export function getLauncherHealth(target: ExportTarget, overrideCmd?: string): L
 
 export function listLauncherHealth(): LauncherHealth[] {
   return EXPORT_TARGETS.map((target) => getLauncherHealth(target));
+}
+
+export function assertRunModeSupported(target: ExportTarget, runMode: boolean): void {
+  if (!runMode) {
+    return;
+  }
+  const adapter = getLaunchAdapter(target);
+  if (!adapter.supports_stdin_run) {
+    throw new Error(
+      `Target '${target}' does not support stdin run injection. Use \`openteam start --target ${target}\` without --run, then paste START_PROMPT manually.`
+    );
+  }
 }
