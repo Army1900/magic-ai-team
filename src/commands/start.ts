@@ -9,6 +9,7 @@ import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP } from "../core/targets";
 import { commandExists, launchTool, resolveToolSpec } from "../core/launchers";
 import { resolveProjectTarget } from "../core/project-target";
+import { reportCommandFailure } from "../core/command-errors";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -125,9 +126,12 @@ export function registerStartCommand(program: Command): void {
           process.exitCode = execution.status ?? 1;
         }
       } catch (e) {
-        error(e instanceof Error ? e.message : String(e));
-        info("Next: run `openteam handoff --project <path>` first, then retry with `openteam start --project <path>`.");
-        process.exitCode = 1;
+        reportCommandFailure({
+          error: e,
+          errorFn: error,
+          infoFn: info,
+          nextHint: "Next: run `openteam handoff --project <path>` first, then retry with `openteam start --project <path>`."
+        });
       }
     });
 }

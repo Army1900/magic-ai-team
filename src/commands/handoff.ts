@@ -6,6 +6,7 @@ import { banner, error, info, kv, success } from "../core/ui";
 import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP } from "../core/targets";
 import { resolveProjectTarget } from "../core/project-target";
+import { reportCommandFailure } from "../core/command-errors";
 
 export function registerHandoffCommand(program: Command): void {
   program
@@ -65,9 +66,12 @@ export function registerHandoffCommand(program: Command): void {
         info(`- ${handoff.first_task}`);
         success("Handoff package generated.");
       } catch (e) {
-        error(e instanceof Error ? e.message : String(e));
-        info("Next: run `openteam export --target <target> --out <project-path>` first, or pass --target.");
-        process.exitCode = 1;
+        reportCommandFailure({
+          error: e,
+          errorFn: error,
+          infoFn: info,
+          nextHint: "Next: run `openteam export --target <target> --out <project-path>` first, or pass --target."
+        });
       }
     });
 }

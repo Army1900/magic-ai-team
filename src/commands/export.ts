@@ -9,6 +9,7 @@ import { resolveManagementModel } from "../core/management-models";
 import { invokeModel } from "../core/model-providers";
 import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
 import { assessGateFindings } from "../core/gates";
+import { reportCommandFailure } from "../core/command-errors";
 
 function resolveTeamFileFromOptions(options: { team?: string; file?: string }): string {
   return resolveTeamFileOrThrow(options);
@@ -198,9 +199,12 @@ export function registerExportCommand(program: Command): void {
           success("No compatibility warnings.");
         }
       } catch (e) {
-        error(e instanceof Error ? e.message : String(e));
-        info("Next: run `openteam validate` and `openteam policy show`, then retry export.");
-        process.exitCode = 1;
+        reportCommandFailure({
+          error: e,
+          errorFn: error,
+          infoFn: info,
+          nextHint: "Next: run `openteam validate` and `openteam policy show`, then retry export."
+        });
       }
     });
 }
