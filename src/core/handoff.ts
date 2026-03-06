@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { ensureDir } from "./config";
 import { TeamConfig } from "./types";
-import { ExportTarget, isExportTarget } from "./targets";
+import { ExportTarget } from "./targets";
 
 export interface HandoffPackage {
   target: ExportTarget;
@@ -19,22 +19,6 @@ export interface HandoffPaths {
   brief: string;
   prompt: string;
   meta: string;
-}
-
-export function readLastExportTarget(projectPath: string): ExportTarget | null {
-  const manifest = path.resolve(projectPath, ".openteam-export", "manifest.json");
-  if (!fs.existsSync(manifest)) {
-    return null;
-  }
-  try {
-    const payload = JSON.parse(fs.readFileSync(manifest, "utf8")) as { target?: string };
-    if (payload.target && isExportTarget(payload.target)) {
-      return payload.target;
-    }
-    return null;
-  } catch {
-    return null;
-  }
 }
 
 function summarizeTeam(team: TeamConfig): string {

@@ -1,35 +1,14 @@
 import { Command } from "commander";
-import { spawnSync } from "node:child_process";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { loadTeamConfig } from "../core/config";
 import { resolveTeamFileOrThrow } from "../core/current-team";
 import { appendWorklogEvent } from "../core/worklog";
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
-import { buildHandoffPackage, readLastExportTarget, writeHandoffPackage } from "../core/handoff";
-import { EXPORT_TARGET_HELP, ExportTarget, getDefaultToolCommand, normalizeExportTarget } from "../core/targets";
-
-function commandExists(command: string): boolean {
-  const probe = process.platform === "win32" ? "where" : "which";
-  const result = spawnSync(probe, [command], { stdio: "ignore" });
-  return result.status === 0;
-}
-
-function splitCommandLine(inputCmd: string): { command: string; args: string[] } {
-  const parts = inputCmd.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) {
-    throw new Error("Empty --tool-cmd.");
-  }
-  return { command: parts[0], args: parts.slice(1) };
-}
-
-function resolveTarget(projectPath: string, target?: string): ExportTarget {
-  if (target) {
-    return normalizeExportTarget(target);
-  }
-  const detected = readLastExportTarget(projectPath);
-  return detected ?? "claude";
-}
+import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
+import { EXPORT_TARGET_HELP } from "../core/targets";
+import { commandExists, launchTool, resolveToolSpec } from "../core/launchers";
+import { resolveProjectTarget } from "../core/project-target";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -55,11 +34,11 @@ export function registerStartCommand(program: Command): void {
       try {
         const teamFile = resolveTeamFileOrThrow(options);
         const projectPath = String(options.project ?? ".");
-        const target = resolveTarget(projectPath, options.target);
+        const target = resolveProjectTarget(projectPath, options.target);
         const team = loadTeamConfig(teamFile);
         const handoff = buildHandoffPackage(team, target);
         const paths = writeHandoffPackage(projectPath, handoff);
-        const toolSpec = splitCommandLine(options.toolCmd ? String(options.toolCmd) : getDefaultToolCommand(target));
+        const toolSpec = resolveToolSpec(target, options.toolCmd ? String(options.toolCmd) : undefined);
 
         const payload = {
           team_file: teamFile,
@@ -118,17 +97,11 @@ export function registerStartCommand(program: Command): void {
           return;
         }
 
-        const execution = options.run
-          ? spawnSync(toolSpec.command, toolSpec.args, {
-              cwd: projectPath,
-              stdio: ["pipe", "inherit", "inherit"],
-              input: `${handoff.prompt}\n`,
-              encoding: "utf8"
-            })
-          : spawnSync(toolSpec.command, toolSpec.args, {
-              cwd: projectPath,
-              stdio: "inherit"
-            });
+        const execution = launchTool(toolSpec, {
+          cwd: projectPath,
+          runMode: Boolean(options.run),
+          prompt: handoff.prompt
+        });
 
         if (execution.error) {
           throw execution.error;

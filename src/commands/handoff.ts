@@ -3,16 +3,9 @@ import { loadTeamConfig } from "../core/config";
 import { resolveTeamFileOrThrow } from "../core/current-team";
 import { appendWorklogEvent } from "../core/worklog";
 import { banner, error, info, kv, success } from "../core/ui";
-import { buildHandoffPackage, readLastExportTarget, writeHandoffPackage } from "../core/handoff";
-import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
-
-function resolveTarget(projectPath: string, target?: string): ExportTarget {
-  if (target) {
-    return normalizeExportTarget(target);
-  }
-  const detected = readLastExportTarget(projectPath);
-  return detected ?? "claude";
-}
+import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
+import { EXPORT_TARGET_HELP } from "../core/targets";
+import { resolveProjectTarget } from "../core/project-target";
 
 export function registerHandoffCommand(program: Command): void {
   program
@@ -27,7 +20,7 @@ export function registerHandoffCommand(program: Command): void {
       try {
         const teamFile = resolveTeamFileOrThrow(options);
         const projectPath = String(options.project ?? ".");
-        const target = resolveTarget(projectPath, options.target);
+        const target = resolveProjectTarget(projectPath, options.target);
         const team = loadTeamConfig(teamFile);
         const handoff = buildHandoffPackage(team, target);
         const paths = writeHandoffPackage(projectPath, handoff);
