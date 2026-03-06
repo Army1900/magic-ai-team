@@ -10,6 +10,7 @@ import { EXPORT_TARGET_HELP } from "../core/targets";
 import { commandExists, launchTool, resolveToolSpec } from "../core/launchers";
 import { resolveProjectTarget } from "../core/project-target";
 import { reportCommandFailure } from "../core/command-errors";
+import { successPayload, toJsonString } from "../core/json-output";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -51,7 +52,7 @@ export function registerStartCommand(program: Command): void {
         };
 
         if (options.json) {
-          console.log(JSON.stringify({ success: true, ...payload }, null, 2));
+          console.log(toJsonString(successPayload(payload)));
           return;
         }
 

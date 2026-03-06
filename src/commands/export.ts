@@ -10,6 +10,7 @@ import { invokeModel } from "../core/model-providers";
 import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
 import { assessGateFindings } from "../core/gates";
 import { reportCommandFailure } from "../core/command-errors";
+import { failurePayload, successPayload, toJsonString } from "../core/json-output";
 
 function resolveTeamFileFromOptions(options: { team?: string; file?: string }): string {
   return resolveTeamFileOrThrow(options);
@@ -43,18 +44,11 @@ export function registerExportCommand(program: Command): void {
           const policyGate = assessGateFindings(policy.findings, strict);
           if (policyGate.blocked) {
             if (options.json) {
-              console.log(
-                JSON.stringify(
-                  {
-                    success: false,
-                    blocked_by: "policy",
-                    team_file: teamFile,
-                    findings: policy.findings
-                  },
-                  null,
-                  2
-                )
-              );
+              console.log(toJsonString(failurePayload({
+                blocked_by: "policy",
+                team_file: teamFile,
+                findings: policy.findings
+              })));
               process.exitCode = 1;
               return;
             }
@@ -74,19 +68,12 @@ export function registerExportCommand(program: Command): void {
         const compatGate = assessGateFindings(compatibility.findings, strict);
         if (compatGate.blocked) {
           if (options.json) {
-            console.log(
-              JSON.stringify(
-                {
-                  success: false,
-                  blocked_by: "compatibility",
-                  target,
-                  team_file: teamFile,
-                  findings: compatibility.findings
-                },
-                null,
-                2
-              )
-            );
+            console.log(toJsonString(failurePayload({
+              blocked_by: "compatibility",
+              target,
+              team_file: teamFile,
+              findings: compatibility.findings
+            })));
             process.exitCode = 1;
             return;
           }
@@ -105,19 +92,12 @@ export function registerExportCommand(program: Command): void {
         const targetGate = assessGateFindings(targetValidation.findings, strictTarget);
         if (targetGate.blocked) {
           if (options.json) {
-            console.log(
-              JSON.stringify(
-                {
-                  success: false,
-                  blocked_by: "target_validation",
-                  target,
-                  team_file: teamFile,
-                  findings: targetValidation.findings
-                },
-                null,
-                2
-              )
-            );
+            console.log(toJsonString(failurePayload({
+              blocked_by: "target_validation",
+              target,
+              team_file: teamFile,
+              findings: targetValidation.findings
+            })));
             process.exitCode = 1;
             return;
           }
@@ -167,19 +147,12 @@ export function registerExportCommand(program: Command): void {
         const manifest = writeExportManifest(options.out, result, teamFile);
 
         if (options.json) {
-          console.log(
-            JSON.stringify(
-              {
-                success: true,
-                team_file: teamFile,
-                target,
-                result,
-                manifest
-              },
-              null,
-              2
-            )
-          );
+          console.log(toJsonString(successPayload({
+            team_file: teamFile,
+            target,
+            result,
+            manifest
+          })));
           return;
         }
 
