@@ -1,6 +1,6 @@
 import { Command } from "commander";
 import { loadTeamConfig } from "../core/config";
-import { exportTeam, ExportTarget, writeExportManifest } from "../core/exporters";
+import { exportTeam, ExportTarget, validateExportResult, writeExportManifest } from "../core/exporters";
 import { banner, error, info, kv, status, success } from "../core/ui";
 import { evaluatePolicies } from "../core/policy";
 import { checkTargetCompatibility } from "../core/compatibility";
@@ -14,21 +14,37 @@ function resolveTeamFileFromOptions(options: { team?: string; file?: string }): 
 
 function normalizeTarget(value: string): ExportTarget {
   const lowered = value.toLowerCase();
-  if (lowered === "opencode" || lowered === "openclaw" || lowered === "claude") {
+  if (
+    lowered === "opencode" ||
+    lowered === "openclaw" ||
+    lowered === "claude" ||
+    lowered === "codex" ||
+    lowered === "aider" ||
+    lowered === "continue" ||
+    lowered === "cline" ||
+    lowered === "openhands" ||
+    lowered === "tabby"
+  ) {
     return lowered;
   }
-  throw new Error("Unsupported target. Use one of: opencode, openclaw, claude");
+  throw new Error(
+    "Unsupported target. Use one of: opencode, openclaw, claude, codex, aider, continue, cline, openhands, tabby"
+  );
 }
 
 export function registerExportCommand(program: Command): void {
   program
     .command("export")
     .description("Export team config to framework-specific project config")
-    .requiredOption("--target <target>", "opencode|openclaw|claude")
+    .requiredOption(
+      "--target <target>",
+      "opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby"
+    )
     .requiredOption("--out <path>", "project output path")
     .option("--team <nameOrSlug>", "team from registry (default: current team)")
     .option("--file <path>", "explicit team.yaml path (overrides --team)")
     .option("--strict", "block export on any warning", false)
+    .option("--strict-target", "block export on any target validation warning", false)
     .option("--skip-policy-gate", "skip policy checks before export", false)
     .option("--mapper-model <model>", "override exporter mapper model")
     .option("--mapper-execution-mode <mode>", "mock|live", "mock")
@@ -106,6 +122,39 @@ export function registerExportCommand(program: Command): void {
 
         const result = exportTeam(team, target, options.out);
         result.warnings.push(...compatWarns.map((w) => `[${w.code}] ${w.message}`));
+        const targetValidation = validateExportResult(result);
+        const targetFails = targetValidation.findings.filter((f) => f.severity === "fail");
+        const targetWarns = targetValidation.findings.filter((f) => f.severity === "warn");
+        const strictTarget = Boolean(options.strictTarget);
+        if (targetFails.length > 0 || (strictTarget && targetWarns.length > 0)) {
+          if (options.json) {
+            console.log(
+              JSON.stringify(
+                {
+                  success: false,
+                  blocked_by: "target_validation",
+                  target,
+                  team_file: teamFile,
+                  findings: targetValidation.findings
+                },
+                null,
+                2
+              )
+            );
+            process.exitCode = 1;
+            return;
+          }
+          error(`Export blocked by ${target} target validation.`);
+          for (const finding of targetValidation.findings) {
+            status(finding.severity, finding.code, finding.message);
+          }
+          info(`Next: rerun export without --strict-target, or fix missing target files for ${target}.`);
+          process.exitCode = 1;
+          return;
+        }
+        for (const finding of targetWarns) {
+          status("warn", finding.code, finding.message);
+        }
 
         const mapperModel = resolveManagementModel("exporter_mapper", options.mapperModel);
         const mapperMode = options.mapperExecutionMode === "live" ? "live" : "mock";

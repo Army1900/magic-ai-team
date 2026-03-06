@@ -8,8 +8,22 @@ import { runUpFlow } from "./up";
 
 function normalizeTarget(target: string): ExportTarget {
   const lowered = target.toLowerCase();
-  if (lowered === "opencode" || lowered === "openclaw" || lowered === "claude") return lowered;
-  throw new Error("Unsupported target. Use one of: opencode, openclaw, claude");
+  if (
+    lowered === "opencode" ||
+    lowered === "openclaw" ||
+    lowered === "claude" ||
+    lowered === "codex" ||
+    lowered === "aider" ||
+    lowered === "continue" ||
+    lowered === "cline" ||
+    lowered === "openhands" ||
+    lowered === "tabby"
+  ) {
+    return lowered;
+  }
+  throw new Error(
+    "Unsupported target. Use one of: opencode, openclaw, claude, codex, aider, continue, cline, openhands, tabby"
+  );
 }
 
 export function registerQuickstartCommand(program: Command): void {
@@ -18,7 +32,7 @@ export function registerQuickstartCommand(program: Command): void {
     .description("Beginner one-command flow: guided setup + optional export")
     .option("--name <name>", "team name")
     .option("--goal <goal>", "team goal")
-    .option("--target <target>", "opencode|openclaw|claude", "claude")
+    .option("--target <target>", "opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby", "claude")
     .option("--out <path>", "project path for auto export")
     .option("--non-interactive", "use defaults/arguments without guided questions", false)
     .option("--task <text>", "sample task", "Draft an initial delivery plan")
@@ -64,7 +78,9 @@ export function registerQuickstartCommand(program: Command): void {
           for (const finding of compatibility.findings) {
             status(finding.severity, finding.code, finding.message);
           }
-          info("Next: try another target with `--target opencode|openclaw|claude`.");
+          info(
+            "Next: try another target with `--target opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby`."
+          );
           process.exitCode = 1;
           return;
         }

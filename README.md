@@ -8,7 +8,8 @@ Model-driven Team OS CLI for creating and managing AI agent teams.
 - Team registry management in `OPENTEAM_HOME`
 - Policy/compatibility gates before export
 - Run -> evaluate -> optimize loop
-- Export to `opencode`, `openclaw`, `claude`
+- Export to `opencode`, `openclaw`, `claude`, `codex`
+- Export to `opencode`, `openclaw`, `claude`, `codex`, `aider`, `continue`, `cline`, `openhands`, `tabby`
 - Provider-centric model management (`current_provider` + `providers.<provider>.models`)
 - Project worklog and progress monitoring (`<project>/.openteam/worklog`)
 
@@ -138,19 +139,41 @@ Command notes:
 openteam export --target opencode --out D:\Projects\my-app
 openteam export --target openclaw --out D:\Projects\my-app
 openteam export --target claude --out D:\Projects\my-app
+openteam export --target codex --out D:\Projects\my-app
+openteam export --target aider --out D:\Projects\my-app
+openteam export --target continue --out D:\Projects\my-app
+openteam export --target cline --out D:\Projects\my-app
+openteam export --target openhands --out D:\Projects\my-app
+openteam export --target tabby --out D:\Projects\my-app
 ```
 
 With strict gate:
 
 ```bash
 openteam export --target claude --out D:\Projects\my-app --strict
+openteam export --target codex --out D:\Projects\my-app --strict-target
 ```
 
 ## Export Output
 
 - `opencode` -> `.opencode/team.json`
+- `opencode` MCP -> `.opencode/mcp.json`
 - `openclaw` -> `.openclaw/openclaw.team.yaml`
+- `openclaw` MCP -> `.openclaw/mcp.openclaw.yaml`
 - `claude` -> `.claude/agents.json` + `.claude/skills.json`
+- `claude` MCP -> `.claude/mcp.json`
+- `codex` -> `.codex/agents.json` + `.codex/skills.json` + `.codex/codex.team.json`
+- `codex` MCP -> `.codex/mcp.json`
+- `aider` -> `.aider/aider.team.json`
+- `aider` MCP -> `.aider/mcp.json`
+- `continue` -> `.continue/config.yaml`
+- `continue` MCP -> `.continue/mcp.json`
+- `cline` -> `.cline/agents.json`
+- `cline` MCP -> `.cline/mcp.json`
+- `openhands` -> `.openhands/workflow.json`
+- `openhands` MCP -> `.openhands/mcp.json`
+- `tabby` -> `.tabby/tabby.team.json`
+- `tabby` MCP -> `.tabby/mcp.json`
 - manifest -> `.openteam-export/manifest.json`
 - project worklog (auto-initialized) ->
   - `.openteam/worklog/events.jsonl`
@@ -317,7 +340,7 @@ openteam create mcp --from-api "https://api.example.com/openapi.json" --attach
 - `simulate`: Run offline batch simulation from dataset.
 - `evaluate`: Generate evaluation report for a run.
 - `optimize`: Propose/apply improvements from run results.
-- `export`: Export to `opencode/openclaw/claude` and initialize project worklog.
+- `export`: Export to `opencode/openclaw/claude/codex/aider/continue/cline/openhands/tabby` and initialize project worklog.
 - `monitor`: Read project `.openteam/worklog` progress and metrics.
 - `provider`: Inspect and test provider auth/connectivity.
 - `policy`: Inspect/enforce policy gates (`risk`, `trust`, `approval`).

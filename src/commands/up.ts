@@ -15,7 +15,16 @@ import { resolveManagementModel } from "../core/management-models";
 import { canInvokeLive, invokeModel } from "../core/model-providers";
 import { loadMethodologyGuidance } from "../core/methodology";
 
-type Target = "opencode" | "openclaw" | "claude";
+type Target =
+  | "opencode"
+  | "openclaw"
+  | "claude"
+  | "codex"
+  | "aider"
+  | "continue"
+  | "cline"
+  | "openhands"
+  | "tabby";
 type Priority = "quality" | "speed" | "cost" | "balanced";
 type HumanLoop = "low" | "medium" | "high";
 
@@ -49,8 +58,22 @@ export interface UpFlowResult {
 
 function normalizeTarget(target: string): Target {
   const lowered = target.toLowerCase();
-  if (lowered === "opencode" || lowered === "openclaw" || lowered === "claude") return lowered;
-  throw new Error("Unsupported target. Use one of: opencode, openclaw, claude");
+  if (
+    lowered === "opencode" ||
+    lowered === "openclaw" ||
+    lowered === "claude" ||
+    lowered === "codex" ||
+    lowered === "aider" ||
+    lowered === "continue" ||
+    lowered === "cline" ||
+    lowered === "openhands" ||
+    lowered === "tabby"
+  ) {
+    return lowered;
+  }
+  throw new Error(
+    "Unsupported target. Use one of: opencode, openclaw, claude, codex, aider, continue, cline, openhands, tabby"
+  );
 }
 
 function normalizePriority(value: string): Priority {
@@ -152,7 +175,13 @@ async function collectDiscovery(options: {
     [
       { key: "1", label: "Claude", value: "claude" },
       { key: "2", label: "OpenCode", value: "opencode" },
-      { key: "3", label: "OpenClaw", value: "openclaw" }
+      { key: "3", label: "OpenClaw", value: "openclaw" },
+      { key: "4", label: "Codex", value: "codex" },
+      { key: "5", label: "Aider", value: "aider" },
+      { key: "6", label: "Continue", value: "continue" },
+      { key: "7", label: "Cline", value: "cline" },
+      { key: "8", label: "OpenHands", value: "openhands" },
+      { key: "9", label: "Tabby", value: "tabby" }
     ],
     defaultTarget
   );
@@ -399,7 +428,7 @@ export function registerUpCommand(program: Command): void {
     .description("Guided bootstrap flow: requirement dialog -> team setup -> validate -> policy -> simulate -> evaluate")
     .option("--name <name>", "team name")
     .option("--goal <goal>", "team goal")
-    .option("--target <target>", "opencode|openclaw|claude")
+    .option("--target <target>", "opencode|openclaw|claude|codex|aider|continue|cline|openhands|tabby")
     .option("--non-interactive", "use defaults/arguments without guided questions", false)
     .option("--task <text>", "sample task", "Draft an initial delivery plan")
     .option("--strict", "block on warnings in policy/compatibility", false)

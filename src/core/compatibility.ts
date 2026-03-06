@@ -89,5 +89,16 @@ export function checkTargetCompatibility(team: TeamConfig, target: ExportTarget)
   if (target === "claude") {
     return { target, findings: checkClaudeCodeCli(team) };
   }
+  if (target === "codex") {
+    return {
+      target,
+      findings: team.execution_plane.agents.length === 0
+        ? [{ severity: "fail", code: "CODEX_NO_AGENTS", message: "at least one execution agent is required." }]
+        : []
+    };
+  }
+  if (target === "aider" || target === "continue" || target === "cline" || target === "openhands" || target === "tabby") {
+    return { target, findings: checkOpencode(team) };
+  }
   return { target, findings: checkOpencode(team) };
 }
