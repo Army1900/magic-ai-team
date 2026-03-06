@@ -203,6 +203,7 @@ openteam start --project D:\Projects\my-app --tool-cmd "claude"
   - `.openteam/worklog/events.jsonl`
   - `.openteam/worklog/daily/YYYY-MM-DD.md`
   - `.openteam/worklog/summary.json`
+  - `.openteam/templates/progress-report.md` (editable report template)
 
 ## Minimal Export Scenarios (Copy/Paste)
 
@@ -238,12 +239,17 @@ Worklog is stored in target project path under `.openteam/worklog`.
 openteam monitor status --project D:\Projects\my-app
 openteam monitor tail --project D:\Projects\my-app -n 30
 openteam monitor report --project D:\Projects\my-app --since 24h
+openteam monitor report --project D:\Projects\my-app --since 24h --md
+openteam monitor report --project D:\Projects\my-app --since 24h --write
 ```
 
 Command notes:
 - `monitor status`: Show overall worklog health and latest event.
 - `monitor tail`: Show the latest N worklog events.
 - `monitor report`: Show metrics for a time window (for example `24h`, `7d`).
+- `monitor report --md`: Render a markdown progress report from editable template.
+- `monitor report --write [path]`: Write markdown report to file (default path under `.openteam/worklog/reports`).
+- Edit template: `.openteam/templates/progress-report.md`.
 
 ## Command Defaults (Important)
 

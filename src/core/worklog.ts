@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { ensureDir } from "./config";
+import { ensureProgressTemplate } from "./progress-template";
 
 export interface WorklogEvent {
   ts: string;
@@ -54,6 +55,7 @@ export function ensureProjectWorklog(projectPath: string, seed?: { team?: string
   const p = getWorklogPaths(projectPath);
   ensureDir(p.root);
   ensureDir(p.dailyDir);
+  ensureProgressTemplate(projectPath);
   if (!fs.existsSync(p.events)) {
     fs.writeFileSync(p.events, "", "utf8");
   }
@@ -150,4 +152,3 @@ export function parseSinceToMs(input: string): number | null {
     7 * 24 * 60 * 60 * 1000;
   return n * mult;
 }
-

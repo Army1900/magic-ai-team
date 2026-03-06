@@ -1,7 +1,10 @@
 import path from "node:path";
+import fs from "node:fs";
 import { Command } from "commander";
 import { error, info, kv, status } from "../core/ui";
 import { getWorklogPaths, parseSinceToMs, readWorklogEvents, WorklogEvent } from "../core/worklog";
+import { readProgressTemplate, renderProgressReport } from "../core/progress-template";
+import { ensureDir } from "../core/config";
 
 function resolveProject(input?: string): string {
   return path.resolve(input ?? process.cwd());
@@ -14,6 +17,20 @@ function formatEventLine(e: WorklogEvent): string {
     (e.agent ? ` | agent=${e.agent}` : "") +
     (e.task ? ` | task=${e.task}` : "") +
     (e.note ? ` | ${e.note}` : "");
+}
+
+function toBulletList(items: string[], emptyFallback: string): string {
+  if (items.length === 0) return `- ${emptyFallback}`;
+  return items.map((s) => `- ${s}`).join("\n");
+}
+
+function compactStatusSummary(input: { ok: number; warn: number; fail: number; cost_usd: number; latency_ms: number }): string {
+  return `ok=${input.ok}, warn=${input.warn}, fail=${input.fail}, cost_usd=${input.cost_usd}, latency_ms=${input.latency_ms}`;
+}
+
+function defaultReportPath(project: string): string {
+  const day = new Date().toISOString().slice(0, 10);
+  return path.resolve(project, ".openteam", "worklog", "reports", `progress-${day}.md`);
 }
 
 export function registerMonitorCommand(program: Command): void {
@@ -96,6 +113,8 @@ export function registerMonitorCommand(program: Command): void {
     .description("Summarize worklog events in a time window")
     .option("--project <path>", "project root path", ".")
     .option("--since <window>", "time window like 24h|7d|30m", "24h")
+    .option("--md", "render markdown report from editable template", false)
+    .option("--write [path]", "write markdown report to path (default: project .openteam/worklog/reports)", false)
     .option("--json", "json output mode", false)
     .action((options) => {
       const project = resolveProject(options.project);
@@ -134,6 +153,73 @@ export function registerMonitorCommand(program: Command): void {
         return;
       }
 
+      const team = events.map((e) => e.team).find((v) => Boolean(v)) ?? "unknown";
+      const typeBreakdown = toBulletList(
+        Object.entries(types).map(([k, v]) => `${k}: ${v}`),
+        "No event types in this window."
+      );
+      const completed = toBulletList(
+        events
+          .filter((e) => e.status === "ok" && (e.agent || e.task || e.note))
+          .slice(-8)
+          .map((e) => {
+            const owner = e.agent ? `[${e.agent}] ` : "";
+            const item = e.task ?? e.note ?? e.type;
+            return `${owner}${item}`;
+          }),
+        "No explicit agent-completed items recorded."
+      );
+      const todo = toBulletList(
+        events
+          .filter((e) => e.status === "fail" || e.status === "warn")
+          .slice(-8)
+          .map((e) => e.task ?? e.note ?? `${e.type} needs follow-up`),
+        "Define next task and keep current cadence."
+      );
+      const overallPlan = toBulletList(
+        [
+          "Keep team objective aligned with current goal and policy constraints.",
+          "Execute highest-impact task first, then evaluate quality/cost/latency.",
+          "Apply optimization changes only after review and policy pass."
+        ],
+        "No plan available."
+      );
+      const progressText =
+        events.length === 0
+          ? "No activity in selected window."
+          : `Observed ${events.length} events in this window. Dominant event type: ${
+              Object.entries(types).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "n/a"
+            }.`;
+      const statusSummary = compactStatusSummary(totals);
+      const template = readProgressTemplate(project);
+      const markdown = renderProgressReport(template, {
+        generated_at: new Date().toISOString(),
+        project,
+        since: options.since,
+        team,
+        total_events: events.length,
+        status_summary: statusSummary,
+        type_breakdown: typeBreakdown,
+        overall_plan: overallPlan,
+        agent_completed: completed,
+        progress: progressText,
+        todo
+      });
+
+      if (options.md || options.write) {
+        info(markdown);
+      }
+      if (options.write) {
+        const outPath =
+          typeof options.write === "string" && options.write.trim().length > 0
+            ? path.resolve(options.write)
+            : defaultReportPath(project);
+        ensureDir(path.dirname(outPath));
+        fs.writeFileSync(outPath, markdown, "utf8");
+        kv("report_file", outPath);
+        info("Template path: .openteam/templates/progress-report.md");
+      }
+
       kv("project", project);
       kv("since", options.since);
       kv("total_events", events.length);
@@ -147,4 +233,3 @@ export function registerMonitorCommand(program: Command): void {
       }
     });
 }
-
