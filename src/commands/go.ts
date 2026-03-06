@@ -12,7 +12,7 @@ import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP, normalizeExportTarget } from "../core/targets";
 import { commandExists, launchTool, resolveToolSpec } from "../core/launchers";
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
-import { reportCommandFailure } from "../core/command-errors";
+import { reportCommandFailure, toErrorMessage } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
 
 async function confirmStart(message: string): Promise<boolean> {
@@ -46,10 +46,11 @@ export function registerGoCommand(program: Command): void {
           name: options.name,
           goal: options.goal,
           target: options.target,
-          nonInteractive: Boolean(options.nonInteractive),
+          nonInteractive: options.json ? true : Boolean(options.nonInteractive),
           task: options.task,
           strict: Boolean(options.strict),
-          verbose: Boolean(options.verbose)
+          verbose: Boolean(options.verbose),
+          silent: Boolean(options.json)
         });
         if (!upResult.ok || !upResult.team_file || !upResult.team_slug) {
           if (options.json) {
@@ -250,6 +251,18 @@ export function registerGoCommand(program: Command): void {
         info(`Monitor: openteam monitor report --project ${projectPath} --since 24h --write`);
         success("Go flow finished.");
       } catch (e) {
+        if (options.json) {
+          console.log(
+            toJsonString(
+              failurePayload({
+                blocked_by: "go",
+                error: toErrorMessage(e)
+              })
+            )
+          );
+          process.exitCode = 1;
+          return;
+        }
         reportCommandFailure({
           error: e,
           errorFn: error,
@@ -259,4 +272,3 @@ export function registerGoCommand(program: Command): void {
       }
     });
 }
-

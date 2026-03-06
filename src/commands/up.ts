@@ -40,6 +40,7 @@ export interface UpCommandOptions {
   task?: string;
   strict?: boolean;
   verbose?: boolean;
+  silent?: boolean;
 }
 
 export interface UpFlowResult {
@@ -236,11 +237,30 @@ function applyDiscoveryHeuristics(team: ReturnType<typeof loadTeamConfig>, answe
 export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult> {
   try {
     const verbose = Boolean(options.verbose);
+    const silent = Boolean(options.silent);
+    const obanner = (title: string, subtitle?: string): void => {
+      if (!silent) banner(title, subtitle);
+    };
+    const oerror = (msg: string): void => {
+      if (!silent) error(msg);
+    };
+    const oinfo = (msg: string): void => {
+      if (!silent) info(msg);
+    };
+    const okv = (key: string, value: string | number | boolean): void => {
+      if (!silent) kv(key, value);
+    };
+    const ostatus = (kind: "ok" | "warn" | "fail", label: string, detail: string): void => {
+      if (!silent) status(kind, label, detail);
+    };
+    const osuccess = (msg: string): void => {
+      if (!silent) success(msg);
+    };
     const vkv = (key: string, value: string | number | boolean): void => {
-      if (verbose) kv(key, value);
+      if (verbose && !silent) kv(key, value);
     };
     const vstatus = (kind: "ok" | "warn" | "fail", label: string, detail: string): void => {
-      if (verbose) status(kind, label, detail);
+      if (verbose && !silent) status(kind, label, detail);
     };
 
     const discovery = await collectDiscovery({
@@ -257,9 +277,9 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
     const plannerModel = resolveManagementModel("planner");
     const plannerExecMode = canInvokeLive(plannerModel) ? "live" : "mock";
 
-    banner("OpenTeam Up", entry.name);
-    kv("team_slug", entry.slug);
-    kv("target", target);
+    obanner("OpenTeam Up", entry.name);
+    okv("team_slug", entry.slug);
+    okv("target", target);
     vkv("team_file", entry.team_file);
     vkv("planner_model", plannerModel);
     vkv("planner_mode", plannerExecMode);
@@ -298,7 +318,7 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
       planningNote = aiPlan.text || planningNote;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      status("warn", "planner_fallback", `AI planning unavailable, fallback to rule mode (${msg})`);
+      ostatus("warn", "planner_fallback", `AI planning unavailable, fallback to rule mode (${msg})`);
     }
     const notePath = path.join(entry.team_dir, "planning-note.md");
     const discoveryPath = path.join(entry.team_dir, "discovery-summary.md");
@@ -325,34 +345,34 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
     vkv("discovery_note", discoveryPath);
     vkv("planning_note", notePath);
 
-    const validation = validateTeamConfig(team);
+      const validation = validateTeamConfig(team);
     if (!validation.valid) {
-      error("Schema validation failed.");
+      oerror("Schema validation failed.");
       for (const e of validation.errors) {
-        status("fail", "schema", e);
+        ostatus("fail", "schema", e);
       }
       return { ok: false };
     }
-    success("Schema validation passed.");
+    osuccess("Schema validation passed.");
 
     const strict = Boolean(options.strict);
     const policy = evaluatePolicies(team);
     const policyGate = assessGateFindings(policy.findings, strict);
     if (verbose) {
       for (const finding of policy.findings) {
-        status(finding.severity, finding.code, finding.message);
+        ostatus(finding.severity, finding.code, finding.message);
       }
     } else {
       for (const finding of policyGate.fails) {
-        status("fail", finding.code, finding.message);
+        ostatus("fail", finding.code, finding.message);
       }
       if (policyGate.warns.length > 0) {
         vstatus("warn", "policy", `warnings=${policyGate.warns.length}`);
       }
     }
     if (policyGate.blocked) {
-      error("Blocked by policy gate.");
-      info("Next: openteam policy show");
+      oerror("Blocked by policy gate.");
+      oinfo("Next: openteam policy show");
       return { ok: false };
     }
 
@@ -363,36 +383,39 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
 
     const report = evaluateRun(team, run);
     const reportPath = saveEvalReport(report, team.observability.store.reports_dir);
-    kv("eval_score", report.summary.overall_score);
+    okv("eval_score", report.summary.overall_score);
     vkv("report_saved", reportPath);
 
     const compatibility = checkTargetCompatibility(team, target);
     const compatGate = assessGateFindings(compatibility.findings, strict);
     if (verbose) {
       for (const finding of compatibility.findings) {
-        status(finding.severity, finding.code, finding.message);
+        ostatus(finding.severity, finding.code, finding.message);
       }
     } else {
       for (const finding of compatGate.fails) {
-        status("fail", finding.code, finding.message);
+        ostatus("fail", finding.code, finding.message);
       }
       if (compatGate.warns.length > 0) {
-        status("warn", "compatibility", `${compatGate.warns.length} warnings (use --verbose to inspect)`);
+        ostatus("warn", "compatibility", `${compatGate.warns.length} warnings (use --verbose to inspect)`);
       }
     }
     if (compatGate.blocked) {
-      error("Blocked by compatibility gate.");
-      info(`Next: choose another target or run: openteam export --team ${entry.slug} --target <target> --out <project-path>`);
+      oerror("Blocked by compatibility gate.");
+      oinfo(`Next: choose another target or run: openteam export --team ${entry.slug} --target <target> --out <project-path>`);
       return { ok: false };
     }
 
-    success("Up flow completed.");
-    info(`Next: openteam export --team ${entry.slug} --target ${target} --out <project-path>`);
-    info("After export, worklog will be created at <project>/.openteam/worklog and can be monitored via `openteam monitor ...`.");
+    osuccess("Up flow completed.");
+    oinfo(`Next: openteam export --team ${entry.slug} --target ${target} --out <project-path>`);
+    oinfo("After export, worklog will be created at <project>/.openteam/worklog and can be monitored via `openteam monitor ...`.");
     return { ok: true, team_slug: entry.slug, team_file: entry.team_file, target };
   } catch (e) {
-    error(e instanceof Error ? e.message : String(e));
-    info("Next: run `openteam team list` or `openteam up --non-interactive` to recover quickly.");
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!Boolean(options.silent)) {
+      error(msg);
+      info("Next: run `openteam team list` or `openteam up --non-interactive` to recover quickly.");
+    }
     return { ok: false };
   }
 }
