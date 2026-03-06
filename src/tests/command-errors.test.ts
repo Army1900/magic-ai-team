@@ -30,7 +30,8 @@ run("reportCommandFailure prints error, optional hint, and sets exit code", () =
       errorFn: (m) => errors.push(m),
       infoFn: (m) => infos.push(m),
       nextHint: "Next: retry",
-      exitCode: 7
+      exitCode: 7,
+      includeAutoFixes: false
     });
     assert.deepEqual(errors, ["fail"]);
     assert.deepEqual(infos, ["Next: retry"]);
@@ -39,4 +40,3 @@ run("reportCommandFailure prints error, optional hint, and sets exit code", () =
     process.exitCode = prev;
   }
 });
-

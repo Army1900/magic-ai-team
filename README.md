@@ -90,6 +90,7 @@ openteam go --project D:\Projects\my-app --target claude
 openteam go --project D:\Projects\my-app --target claude --non-interactive --yes
 openteam go --project D:\Projects\my-app --target claude --no-start
 openteam go --project D:\Projects\my-app --target claude --json
+openteam go --resume
 openteam launcher check
 openteam launcher check --target claude
 openteam launcher check --target claude --json
@@ -114,6 +115,8 @@ Flow in `up`:
 `go` notes:
 - includes launcher precheck signal for the selected target
 - in `--json` mode output is machine-readable only (no extra text)
+- supports checkpoint resume via `--resume` (uses `OPENTEAM_HOME/recovery/go-last.json`)
+- command failures now print auto-fix suggestions (`Fix: ...`) for common issues
 
 ### 2) Status / Validation
 
@@ -410,6 +413,7 @@ openteam create mcp --from-api "https://api.example.com/openapi.json" --attach
 ## Command Cheatsheet
 
 - `go`: Default beginner entrypoint; one-command orchestrator (`up -> export -> handoff -> start`).
+- `go --resume`: Resume last failed/incomplete go flow from checkpoint.
 - `quickstart`: Legacy guided setup + optional export (still supported).
 - `up`: Guided setup only (no automatic export); more flexible than quickstart.
 - `team`: Registry operations (create/select/show teams).

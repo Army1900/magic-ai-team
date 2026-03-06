@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { runUpFlow } from "./up";
+import { runUpFlow, UpFlowResult } from "./up";
 import { loadTeamConfig } from "../core/config";
 import { checkTargetCompatibility } from "../core/compatibility";
 import { assessGateFindings } from "../core/gates";
@@ -14,12 +14,17 @@ import { assertRunModeSupported, commandExists, getLauncherHealth, launchTool, r
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
 import { reportCommandFailure, toErrorMessage } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
+import { initGoRecovery, loadGoRecovery, saveGoRecovery } from "../core/go-recovery";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
   const answer = (await rl.question(`${message} [y/N]: `)).trim().toLowerCase();
   rl.close();
   return answer === "y" || answer === "yes";
+}
+
+function hasCliFlag(flag: string): boolean {
+  return process.argv.includes(flag);
 }
 
 export function registerGoCommand(program: Command): void {
@@ -38,35 +43,92 @@ export function registerGoCommand(program: Command): void {
     .option("--tool-cmd <command>", "override launch command, e.g. \"claude\"")
     .option("--run", "attempt one-shot run by piping START_PROMPT to tool stdin", false)
     .option("--no-start", "do not launch target tool after handoff")
+    .option("--resume", "resume last failed/incomplete go flow from recovery checkpoint", false)
     .option("--yes", "skip start confirmation", false)
     .option("--json", "json output mode", false)
     .action(async (options) => {
+      let recoveryPath = "";
+      let recovery = loadGoRecovery();
       try {
-        const upResult = await runUpFlow({
-          name: options.name,
-          goal: options.goal,
-          target: options.target,
-          nonInteractive: options.json ? true : Boolean(options.nonInteractive),
-          task: options.task,
-          strict: Boolean(options.strict),
-          verbose: Boolean(options.verbose),
-          silent: Boolean(options.json)
-        });
-        if (!upResult.ok || !upResult.team_file || !upResult.team_slug) {
-          if (options.json) {
-            console.log(toJsonString(failurePayload({ blocked_by: "up" })));
-          }
-          process.exitCode = 1;
-          return;
-        }
+        const resumeMode = Boolean(options.resume);
+        const targetInput =
+          resumeMode && recovery && !hasCliFlag("--target")
+            ? recovery.options.target
+            : options.target ?? recovery?.options.target ?? "claude";
+        const projectInput =
+          resumeMode && recovery && !hasCliFlag("--project")
+            ? recovery.options.project
+            : options.project ?? recovery?.options.project ?? ".";
+        const runInput =
+          resumeMode && !hasCliFlag("--run")
+            ? false
+            : Boolean(options.run);
+        const shouldStartInput =
+          resumeMode && recovery && !hasCliFlag("--no-start")
+            ? recovery.options.should_start
+            : Boolean(options.start);
 
-        const target = normalizeExportTarget(options.target ?? upResult.target ?? "claude");
-        const projectPath = String(options.project ?? ".");
+        const target = normalizeExportTarget(targetInput);
+        const projectPath = String(projectInput);
         const strict = Boolean(options.strict);
         const strictTarget = Boolean(options.strictTarget);
-        const team = loadTeamConfig(upResult.team_file);
-        const shouldStart = Boolean(options.start);
-        assertRunModeSupported(target, Boolean(options.run));
+        const shouldStart = options.json ? false : shouldStartInput;
+        const autoYes = options.json ? true : Boolean(options.yes);
+
+        if (Boolean(options.resume)) {
+          if (!recovery || recovery.status === "completed") {
+            throw new Error("No resumable go checkpoint found. Run `openteam go` first.");
+          }
+        } else {
+          recovery = initGoRecovery({
+            target,
+            project: projectPath,
+            run: runInput,
+            should_start: shouldStart
+          });
+          recoveryPath = saveGoRecovery(recovery);
+        }
+        if (!recovery) {
+          throw new Error("Failed to initialize go recovery state.");
+        }
+        recoveryPath = recoveryPath || saveGoRecovery(recovery);
+        assertRunModeSupported(target, runInput);
+
+        let upResult: UpFlowResult = {
+          ok: true,
+          team_file: recovery.artifacts.team_file,
+          team_slug: recovery.artifacts.team_slug,
+          target
+        };
+        if (!recovery.artifacts.team_file || !recovery.artifacts.team_slug) {
+          upResult = await runUpFlow({
+            name: options.name,
+            goal: options.goal,
+            target,
+            nonInteractive: options.json ? true : Boolean(options.nonInteractive),
+            task: options.task,
+            strict: Boolean(options.strict),
+            verbose: Boolean(options.verbose),
+            silent: Boolean(options.json)
+          });
+          if (!upResult.ok || !upResult.team_file || !upResult.team_slug) {
+            recovery.status = "failed";
+            recovery.phase = "up";
+            recovery.last_error = "up failed";
+            saveGoRecovery(recovery);
+            if (options.json) {
+              console.log(toJsonString(failurePayload({ blocked_by: "up", recovery: recoveryPath })));
+            }
+            process.exitCode = 1;
+            return;
+          }
+          recovery.phase = "export";
+          recovery.artifacts.team_file = upResult.team_file;
+          recovery.artifacts.team_slug = upResult.team_slug;
+          saveGoRecovery(recovery);
+        }
+
+        const team = loadTeamConfig(String(upResult.team_file));
         const preflight = shouldStart
           ? getLauncherHealth(target, options.toolCmd ? String(options.toolCmd) : undefined)
           : null;
@@ -83,7 +145,7 @@ export function registerGoCommand(program: Command): void {
               toJsonString(
                 failurePayload({
                   blocked_by: "policy",
-                  team_file: upResult.team_file,
+                  team_file: String(upResult.team_file),
                   findings: policy.findings
                 })
               )
@@ -95,6 +157,10 @@ export function registerGoCommand(program: Command): void {
           for (const finding of policy.findings) {
             status(finding.severity, finding.code, finding.message);
           }
+          recovery.status = "failed";
+          recovery.phase = "export";
+          recovery.last_error = "policy gate blocked";
+          saveGoRecovery(recovery);
           process.exitCode = 1;
           return;
         }
@@ -107,7 +173,7 @@ export function registerGoCommand(program: Command): void {
               toJsonString(
                 failurePayload({
                   blocked_by: "compatibility",
-                  team_file: upResult.team_file,
+                  team_file: String(upResult.team_file),
                   target,
                   findings: compatibility.findings
                 })
@@ -120,57 +186,86 @@ export function registerGoCommand(program: Command): void {
           for (const finding of compatibility.findings) {
             status(finding.severity, finding.code, finding.message);
           }
+          recovery.status = "failed";
+          recovery.phase = "export";
+          recovery.last_error = "compatibility gate blocked";
+          saveGoRecovery(recovery);
           process.exitCode = 1;
           return;
         }
 
-        const exported = exportTeam(team, target, projectPath);
-        exported.warnings.push(...compatGate.warns.map((w) => `[${w.code}] ${w.message}`));
-        const targetValidation = validateExportResult(exported);
-        const targetGate = assessGateFindings(targetValidation.findings, strictTarget);
-        if (targetGate.blocked) {
-          if (options.json) {
-            console.log(
-              toJsonString(
-                failurePayload({
-                  blocked_by: "target_validation",
-                  team_file: upResult.team_file,
-                  target,
-                  findings: targetValidation.findings
-                })
-              )
-            );
+        let manifest: string = recovery.artifacts.manifest ?? "";
+        if (!manifest) {
+          const exported = exportTeam(team, target, projectPath);
+          exported.warnings.push(...compatGate.warns.map((w) => `[${w.code}] ${w.message}`));
+          const targetValidation = validateExportResult(exported);
+          const targetGate = assessGateFindings(targetValidation.findings, strictTarget);
+          if (targetGate.blocked) {
+            if (options.json) {
+              console.log(
+                toJsonString(
+                  failurePayload({
+                    blocked_by: "target_validation",
+                    team_file: String(upResult.team_file),
+                    target,
+                    findings: targetValidation.findings,
+                    recovery: recoveryPath
+                  })
+                )
+              );
+              process.exitCode = 1;
+              return;
+            }
+            error(`Go blocked by ${target} target validation.`);
+            for (const finding of targetValidation.findings) {
+              status(finding.severity, finding.code, finding.message);
+            }
+            recovery.status = "failed";
+            recovery.phase = "export";
+            recovery.last_error = "target validation blocked";
+            saveGoRecovery(recovery);
             process.exitCode = 1;
             return;
           }
-          error(`Go blocked by ${target} target validation.`);
-          for (const finding of targetValidation.findings) {
-            status(finding.severity, finding.code, finding.message);
-          }
-          process.exitCode = 1;
-          return;
+
+          manifest = writeExportManifest(projectPath, exported, String(upResult.team_file));
+          recovery.phase = "handoff";
+          recovery.artifacts.manifest = manifest;
+          saveGoRecovery(recovery);
         }
 
-        const manifest = writeExportManifest(projectPath, exported, upResult.team_file);
-        const handoff = buildHandoffPackage(team, target);
-        const handoffPaths = writeHandoffPackage(projectPath, handoff);
-        appendWorklogEvent(projectPath, {
-          type: "handoff",
-          team: team.team.name,
-          status: "ok",
-          note: `handoff generated for ${target}`,
-          meta: {
-            team_file: upResult.team_file,
-            target,
-            handoff_paths: handoffPaths
-          }
-        });
+        let handoffPaths = recovery.artifacts.handoff_brief
+          ? {
+              root: "",
+              brief: recovery.artifacts.handoff_brief,
+              prompt: "",
+              meta: ""
+            }
+          : null;
+        if (!handoffPaths) {
+          const handoff = buildHandoffPackage(team, target);
+          handoffPaths = writeHandoffPackage(projectPath, handoff);
+          appendWorklogEvent(projectPath, {
+            type: "handoff",
+            team: team.team.name,
+            status: "ok",
+            note: `handoff generated for ${target}`,
+            meta: {
+              team_file: String(upResult.team_file),
+              target,
+              handoff_paths: handoffPaths
+            }
+          });
+          recovery.phase = "start";
+          recovery.artifacts.handoff_brief = handoffPaths.brief;
+          saveGoRecovery(recovery);
+        }
 
         let started = false;
-        let startExitCode: number | null = null;
+        let startExitCode: number | null = recovery.artifacts.start_exit_code ?? null;
         if (shouldStart) {
           const toolSpec = resolveToolSpec(target, options.toolCmd ? String(options.toolCmd) : undefined);
-          if (!options.yes) {
+          if (!autoYes) {
             const ok = await confirmStart(`Start team in ${projectPath} using ${toolSpec.command}?`);
             if (!ok) {
               warn("Start skipped by user confirmation.");
@@ -180,8 +275,8 @@ export function registerGoCommand(program: Command): void {
             } else {
               const execution = launchTool(toolSpec, {
                 cwd: projectPath,
-                runMode: Boolean(options.run),
-                prompt: handoff.prompt
+                runMode: runInput,
+                prompt: buildHandoffPackage(team, target).prompt
               });
               if (execution.error) {
                 throw execution.error;
@@ -196,17 +291,19 @@ export function registerGoCommand(program: Command): void {
                 meta: {
                   target,
                   exit_code: execution.status,
-                  run_mode: Boolean(options.run)
+                  run_mode: runInput
                 }
               });
+              recovery.artifacts.start_exit_code = startExitCode;
+              saveGoRecovery(recovery);
             }
           } else if (!commandExists(toolSpec.command)) {
             warn(`Tool command not found: ${toolSpec.command}`);
           } else {
             const execution = launchTool(toolSpec, {
               cwd: projectPath,
-              runMode: Boolean(options.run),
-              prompt: handoff.prompt
+              runMode: runInput,
+              prompt: buildHandoffPackage(team, target).prompt
             });
             if (execution.error) {
               throw execution.error;
@@ -221,22 +318,28 @@ export function registerGoCommand(program: Command): void {
               meta: {
                 target,
                 exit_code: execution.status,
-                run_mode: Boolean(options.run)
+                run_mode: runInput
               }
             });
+            recovery.artifacts.start_exit_code = startExitCode;
+            saveGoRecovery(recovery);
           }
         }
 
+        recovery.status = "completed";
+        saveGoRecovery(recovery);
+
         const payload = successPayload({
-          team_slug: upResult.team_slug,
-          team_file: upResult.team_file,
+          team_slug: String(upResult.team_slug),
+          team_file: String(upResult.team_file),
           target,
           project: projectPath,
           launcher: preflight,
           manifest,
-          handoff_paths: handoffPaths,
+          handoff_paths: handoffPaths ?? undefined,
           started,
-          start_exit_code: startExitCode
+          start_exit_code: startExitCode,
+          recovery: recoveryPath
         });
         if (options.json) {
           console.log(toJsonString(payload));
@@ -244,7 +347,7 @@ export function registerGoCommand(program: Command): void {
         }
 
         banner("Go Complete", target);
-        kv("team_slug", upResult.team_slug);
+        kv("team_slug", String(upResult.team_slug));
         kv("project", projectPath);
         kv("manifest", manifest);
         kv("handoff", handoffPaths.brief);
@@ -260,12 +363,18 @@ export function registerGoCommand(program: Command): void {
         info(`Monitor: openteam monitor report --project ${projectPath} --since 24h --write`);
         success("Go flow finished.");
       } catch (e) {
+        if (recovery) {
+          recovery.status = "failed";
+          recovery.last_error = toErrorMessage(e);
+          saveGoRecovery(recovery);
+        }
         if (options.json) {
           console.log(
             toJsonString(
               failurePayload({
                 blocked_by: "go",
-                error: toErrorMessage(e)
+                error: toErrorMessage(e),
+                recovery: recoveryPath || undefined
               })
             )
           );
