@@ -15,6 +15,7 @@ import { resolveManagementModel } from "../core/management-models";
 import { canInvokeLive, invokeModel } from "../core/model-providers";
 import { loadMethodologyGuidance } from "../core/methodology";
 import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
+import { assessGateFindings } from "../core/gates";
 
 type Target = ExportTarget;
 type Priority = "quality" | "speed" | "cost" | "balanced";
@@ -336,21 +337,20 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
 
     const strict = Boolean(options.strict);
     const policy = evaluatePolicies(team);
-    const policyFails = policy.findings.filter((f) => f.severity === "fail");
-    const policyWarns = policy.findings.filter((f) => f.severity === "warn");
+    const policyGate = assessGateFindings(policy.findings, strict);
     if (verbose) {
       for (const finding of policy.findings) {
         status(finding.severity, finding.code, finding.message);
       }
     } else {
-      for (const finding of policyFails) {
+      for (const finding of policyGate.fails) {
         status("fail", finding.code, finding.message);
       }
-      if (policyWarns.length > 0) {
-        vstatus("warn", "policy", `warnings=${policyWarns.length}`);
+      if (policyGate.warns.length > 0) {
+        vstatus("warn", "policy", `warnings=${policyGate.warns.length}`);
       }
     }
-    if (policyFails.length > 0 || (strict && policyWarns.length > 0)) {
+    if (policyGate.blocked) {
       error("Blocked by policy gate.");
       info("Next: openteam policy show");
       return { ok: false };
@@ -367,21 +367,20 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
     vkv("report_saved", reportPath);
 
     const compatibility = checkTargetCompatibility(team, target);
-    const compatFails = compatibility.findings.filter((f) => f.severity === "fail");
-    const compatWarns = compatibility.findings.filter((f) => f.severity === "warn");
+    const compatGate = assessGateFindings(compatibility.findings, strict);
     if (verbose) {
       for (const finding of compatibility.findings) {
         status(finding.severity, finding.code, finding.message);
       }
     } else {
-      for (const finding of compatFails) {
+      for (const finding of compatGate.fails) {
         status("fail", finding.code, finding.message);
       }
-      if (compatWarns.length > 0) {
-        status("warn", "compatibility", `${compatWarns.length} warnings (use --verbose to inspect)`);
+      if (compatGate.warns.length > 0) {
+        status("warn", "compatibility", `${compatGate.warns.length} warnings (use --verbose to inspect)`);
       }
     }
-    if (compatFails.length > 0 || (strict && compatWarns.length > 0)) {
+    if (compatGate.blocked) {
       error("Blocked by compatibility gate.");
       info(`Next: choose another target or run: openteam export --team ${entry.slug} --target <target> --out <project-path>`);
       return { ok: false };

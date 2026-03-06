@@ -6,6 +6,7 @@ import { evaluatePolicies } from "../core/policy";
 import { banner, error, info, kv, status, success } from "../core/ui";
 import { runUpFlow } from "./up";
 import { EXPORT_TARGET_HELP, normalizeExportTarget } from "../core/targets";
+import { assessGateFindings } from "../core/gates";
 
 export function registerQuickstartCommand(program: Command): void {
   program
@@ -39,9 +40,8 @@ export function registerQuickstartCommand(program: Command): void {
         const team = loadTeamConfig(upResult.team_file);
 
         const policy = evaluatePolicies(team);
-        const policyFails = policy.findings.filter((f) => f.severity === "fail");
-        const policyWarns = policy.findings.filter((f) => f.severity === "warn");
-        if (policyFails.length > 0 || (strict && policyWarns.length > 0)) {
+        const policyGate = assessGateFindings(policy.findings, strict);
+        if (policyGate.blocked) {
           error("Quickstart export blocked by policy gate.");
           for (const finding of policy.findings) {
             status(finding.severity, finding.code, finding.message);
@@ -52,9 +52,8 @@ export function registerQuickstartCommand(program: Command): void {
         }
 
         const compatibility = checkTargetCompatibility(team, target);
-        const compatFails = compatibility.findings.filter((f) => f.severity === "fail");
-        const compatWarns = compatibility.findings.filter((f) => f.severity === "warn");
-        if (compatFails.length > 0 || (strict && compatWarns.length > 0)) {
+        const compatGate = assessGateFindings(compatibility.findings, strict);
+        if (compatGate.blocked) {
           error("Quickstart export blocked by compatibility gate.");
           for (const finding of compatibility.findings) {
             status(finding.severity, finding.code, finding.message);
@@ -67,7 +66,7 @@ export function registerQuickstartCommand(program: Command): void {
         }
 
         const result = exportTeam(team, target, options.out);
-        result.warnings.push(...compatWarns.map((w) => `[${w.code}] ${w.message}`));
+        result.warnings.push(...compatGate.warns.map((w) => `[${w.code}] ${w.message}`));
         const manifest = writeExportManifest(options.out, result, upResult.team_file);
         const verbose = Boolean(options.verbose);
 

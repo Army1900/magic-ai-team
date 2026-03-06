@@ -8,6 +8,7 @@ import { resolveTeamFileOrThrow } from "../core/current-team";
 import { resolveManagementModel } from "../core/management-models";
 import { invokeModel } from "../core/model-providers";
 import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core/targets";
+import { assessGateFindings } from "../core/gates";
 
 function resolveTeamFileFromOptions(options: { team?: string; file?: string }): string {
   return resolveTeamFileOrThrow(options);
@@ -38,9 +39,8 @@ export function registerExportCommand(program: Command): void {
 
         if (!skipPolicyGate) {
           const policy = evaluatePolicies(team);
-          const policyFails = policy.findings.filter((f) => f.severity === "fail");
-          const policyWarns = policy.findings.filter((f) => f.severity === "warn");
-          if (policyFails.length > 0 || (strict && policyWarns.length > 0)) {
+          const policyGate = assessGateFindings(policy.findings, strict);
+          if (policyGate.blocked) {
             if (options.json) {
               console.log(
                 JSON.stringify(
@@ -64,15 +64,14 @@ export function registerExportCommand(program: Command): void {
             process.exitCode = 1;
             return;
           }
-          for (const finding of policyWarns) {
+          for (const finding of policyGate.warns) {
             status("warn", finding.code, finding.message);
           }
         }
 
         const compatibility = checkTargetCompatibility(team, target);
-        const compatFails = compatibility.findings.filter((f) => f.severity === "fail");
-        const compatWarns = compatibility.findings.filter((f) => f.severity === "warn");
-        if (compatFails.length > 0 || (strict && compatWarns.length > 0)) {
+        const compatGate = assessGateFindings(compatibility.findings, strict);
+        if (compatGate.blocked) {
           if (options.json) {
             console.log(
               JSON.stringify(
@@ -99,12 +98,11 @@ export function registerExportCommand(program: Command): void {
         }
 
         const result = exportTeam(team, target, options.out);
-        result.warnings.push(...compatWarns.map((w) => `[${w.code}] ${w.message}`));
+        result.warnings.push(...compatGate.warns.map((w) => `[${w.code}] ${w.message}`));
         const targetValidation = validateExportResult(result);
-        const targetFails = targetValidation.findings.filter((f) => f.severity === "fail");
-        const targetWarns = targetValidation.findings.filter((f) => f.severity === "warn");
         const strictTarget = Boolean(options.strictTarget);
-        if (targetFails.length > 0 || (strictTarget && targetWarns.length > 0)) {
+        const targetGate = assessGateFindings(targetValidation.findings, strictTarget);
+        if (targetGate.blocked) {
           if (options.json) {
             console.log(
               JSON.stringify(
@@ -130,7 +128,7 @@ export function registerExportCommand(program: Command): void {
           process.exitCode = 1;
           return;
         }
-        for (const finding of targetWarns) {
+        for (const finding of targetGate.warns) {
           status("warn", finding.code, finding.message);
         }
 
