@@ -38,6 +38,8 @@ npx openteam --help
 openteam quickstart
 openteam status
 openteam export --target claude --out D:\Projects\my-app
+openteam handoff --project D:\Projects\my-app
+openteam start --project D:\Projects\my-app
 openteam monitor status --project D:\Projects\my-app
 ```
 
@@ -153,6 +155,25 @@ openteam export --target claude --out D:\Projects\my-app --strict
 openteam export --target codex --out D:\Projects\my-app --strict-target
 ```
 
+### 5) Handoff and Start Team Work
+
+```bash
+# Generate handoff package (brief + start prompt)
+openteam handoff --project D:\Projects\my-app
+
+# Start target tool (default: detect target from latest export manifest)
+openteam start --project D:\Projects\my-app
+
+# Preview only
+openteam start --project D:\Projects\my-app --dry-run
+
+# Attempt one-shot run by piping START_PROMPT to tool stdin
+openteam start --project D:\Projects\my-app --run --yes
+
+# Override launch command if needed
+openteam start --project D:\Projects\my-app --tool-cmd "claude"
+```
+
 ## Export Output
 
 - `opencode` -> `.opencode/team.json`
@@ -174,6 +195,10 @@ openteam export --target codex --out D:\Projects\my-app --strict-target
 - `tabby` -> `.tabby/tabby.team.json`
 - `tabby` MCP -> `.tabby/mcp.json`
 - manifest -> `.openteam-export/manifest.json`
+- handoff package ->
+  - `.openteam/handoff/TEAM_BRIEF.md`
+  - `.openteam/handoff/START_PROMPT.md`
+  - `.openteam/handoff/handoff.json`
 - project worklog (auto-initialized) ->
   - `.openteam/worklog/events.jsonl`
   - `.openteam/worklog/daily/YYYY-MM-DD.md`
@@ -366,6 +391,8 @@ openteam create mcp --from-api "https://api.example.com/openapi.json" --attach
 - `evaluate`: Generate evaluation report for a run.
 - `optimize`: Propose/apply improvements from run results.
 - `export`: Export to `opencode/openclaw/claude/codex/aider/continue/cline/openhands/tabby` and initialize project worklog.
+- `handoff`: Generate a team handoff package in project `.openteam/handoff`.
+- `start`: Launch target tool with handoff context; optional `--run` for one-shot start.
 - `monitor`: Read project `.openteam/worklog` progress and metrics.
 - `provider`: Inspect and test provider auth/connectivity.
 - `policy`: Inspect/enforce policy gates (`risk`, `trust`, `approval`).
