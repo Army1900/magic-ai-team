@@ -7,16 +7,28 @@ import { appendWorklogEvent } from "../core/worklog";
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
 import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP } from "../core/targets";
-import { assertRunModeSupported, commandExists, launchTool, resolveToolSpec } from "../core/launchers";
+import {
+  commandExists,
+  executeRunExecutionPlan,
+  launchTool,
+  resolveRunExecutionPlan,
+  resolveToolSpec
+} from "../core/launchers";
 import { resolveProjectTarget } from "../core/project-target";
 import { reportCommandFailure } from "../core/command-errors";
-import { successPayload, toJsonString } from "../core/json-output";
+import { failurePayload, successPayload, toJsonString } from "../core/json-output";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
   const answer = (await rl.question(`${message} [y/N]: `)).trim().toLowerCase();
   rl.close();
   return answer === "y" || answer === "yes";
+}
+
+function redactRunPlan(plan: ReturnType<typeof resolveRunExecutionPlan> | null): Record<string, unknown> | null {
+  if (!plan) return null;
+  const { prompt: _ignored, ...rest } = plan;
+  return rest;
 }
 
 export function registerStartCommand(program: Command): void {
@@ -37,11 +49,19 @@ export function registerStartCommand(program: Command): void {
         const teamFile = resolveTeamFileOrThrow(options);
         const projectPath = String(options.project ?? ".");
         const target = resolveProjectTarget(projectPath, options.target);
-        assertRunModeSupported(target, Boolean(options.run));
         const team = loadTeamConfig(teamFile);
         const handoff = buildHandoffPackage(team, target);
         const paths = writeHandoffPackage(projectPath, handoff);
         const toolSpec = resolveToolSpec(target, options.toolCmd ? String(options.toolCmd) : undefined);
+        const runPlan = Boolean(options.run)
+          ? resolveRunExecutionPlan({
+              target,
+              tool: toolSpec,
+              prompt: handoff.prompt,
+              promptFile: paths.prompt,
+              projectPath
+            })
+          : null;
 
         const payload = {
           team_file: teamFile,
@@ -49,10 +69,25 @@ export function registerStartCommand(program: Command): void {
           target,
           tool: toolSpec,
           run_mode: Boolean(options.run),
+          run_plan: redactRunPlan(runPlan),
           handoff_paths: paths
         };
 
         if (options.json) {
+          if (Boolean(options.run) && runPlan && !runPlan.supported) {
+            console.log(
+              toJsonString(
+                failurePayload({
+                  blocked_by: "run_plan",
+                  target,
+                  reason: runPlan.reason ?? "unsupported run plan",
+                  payload
+                })
+              )
+            );
+            process.exitCode = 1;
+            return;
+          }
           console.log(toJsonString(successPayload(payload)));
           return;
         }
@@ -100,17 +135,29 @@ export function registerStartCommand(program: Command): void {
           return;
         }
 
-        const execution = launchTool(toolSpec, {
-          cwd: projectPath,
-          runMode: Boolean(options.run),
-          prompt: handoff.prompt
-        });
+        const finalExecution = Boolean(options.run)
+          ? executeRunExecutionPlan(
+              runPlan ?? {
+                supported: false,
+                strategy: "manual",
+                command: toolSpec.command,
+                args: toolSpec.args,
+                prompt: handoff.prompt,
+                reason: "run plan missing"
+              },
+              projectPath
+            )
+          : launchTool(toolSpec, {
+              cwd: projectPath,
+              runMode: false,
+              prompt: handoff.prompt
+            });
 
-        if (execution.error) {
-          throw execution.error;
+        if (finalExecution.error) {
+          throw finalExecution.error;
         }
 
-        const ok = execution.status === 0;
+        const ok = finalExecution.status === 0;
         appendWorklogEvent(projectPath, {
           type: "start",
           team: team.team.name,
@@ -118,14 +165,14 @@ export function registerStartCommand(program: Command): void {
           note: ok ? `team started in ${target}` : `team start failed in ${target}`,
           meta: {
             ...payload,
-            exit_code: execution.status
+            exit_code: finalExecution.status
           }
         });
         if (ok) {
           success("Team start command completed.");
         } else {
-          status("fail", "start", `exit_code=${execution.status ?? -1}`);
-          process.exitCode = execution.status ?? 1;
+          status("fail", "start", `exit_code=${finalExecution.status ?? -1}`);
+          process.exitCode = finalExecution.status ?? 1;
         }
       } catch (e) {
         reportCommandFailure({

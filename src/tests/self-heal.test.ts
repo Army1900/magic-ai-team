@@ -26,3 +26,7 @@ run("suggestFixes provides fallback doctor advice", () => {
   assert.equal(fixes[0].includes("openteam doctor"), true);
 });
 
+run("suggestFixes returns launcher args-template advice", () => {
+  const fixes = suggestFixes("args run strategy requires launchers.continue.run.args_template in openteam.yaml");
+  assert.equal(fixes.some((f) => f.includes("args template")), true);
+});

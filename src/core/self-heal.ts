@@ -16,6 +16,10 @@ export function suggestFixes(errorMessage: string): string[] {
     fixes.push("Run without `--run`, then paste `.openteam/handoff/START_PROMPT.md` manually in target tool.");
   }
 
+  if (msg.includes("args run strategy requires launchers")) {
+    fixes.push("Add launcher run args template in `openteam.yaml`, e.g. launchers.<target>.run.args_template.");
+  }
+
   if (msg.includes("no team file found")) {
     fixes.push("Select a team: `openteam team use --name <team>`.");
     fixes.push("Or create one quickly: `openteam go --target claude --project <path>`.");
@@ -34,4 +38,3 @@ export function suggestFixes(errorMessage: string): string[] {
   }
   return fixes;
 }
-

@@ -139,6 +139,71 @@ export interface OpenTeamConfig {
     allow_ai_generated: boolean;
     min_trust_score: number;
   };
+  launchers?: Partial<{
+    opencode: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    openclaw: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    claude: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    codex: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    aider: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    continue: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    cline: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    openhands: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+    tabby: {
+      run?: {
+        mode?: "stdin" | "args" | "manual";
+        args_template?: string[];
+        manual_hint?: string;
+      };
+    };
+  }>;
 }
 
 export interface AgentRunStep {

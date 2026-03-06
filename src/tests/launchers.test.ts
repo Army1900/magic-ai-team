@@ -6,6 +6,7 @@ import {
   getLauncherHealth,
   listLauncherHealth,
   parseToolCommand,
+  resolveRunExecutionPlan,
   resolveToolSpec
 } from "../core/launchers";
 
@@ -67,4 +68,34 @@ run("assertRunModeSupported allows run mode for claude", () => {
 
 run("assertRunModeSupported blocks run mode for continue", () => {
   assert.throws(() => assertRunModeSupported("continue", true), /does not support stdin run injection/);
+});
+
+run("resolveRunExecutionPlan supports args-template override for continue", () => {
+  const plan = resolveRunExecutionPlan({
+    target: "continue",
+    tool: { command: "continue", args: [] },
+    prompt: "hello",
+    promptFile: "/tmp/prompt.md",
+    projectPath: "/tmp/project",
+    overrideRun: {
+      mode: "args",
+      args_template: ["run", "--prompt-file", "{prompt_file}"]
+    }
+  });
+  assert.equal(plan.supported, true);
+  assert.equal(plan.strategy, "args");
+  assert.deepEqual(plan.args, ["run", "--prompt-file", "/tmp/prompt.md"]);
+});
+
+run("resolveRunExecutionPlan returns manual unsupported by default for continue", () => {
+  const plan = resolveRunExecutionPlan({
+    target: "continue",
+    tool: { command: "continue", args: [] },
+    prompt: "hello",
+    promptFile: "/tmp/prompt.md",
+    projectPath: "/tmp/project",
+    overrideRun: null
+  });
+  assert.equal(plan.supported, false);
+  assert.equal(plan.strategy, "manual");
 });

@@ -19,6 +19,7 @@ export interface GoRecoveryState {
     team_file?: string;
     manifest?: string;
     handoff_brief?: string;
+    handoff_prompt?: string;
     start_exit_code?: number | null;
   };
   last_error?: string;
@@ -72,4 +73,3 @@ export function initGoRecovery(options: GoRecoveryState["options"]): GoRecoveryS
     artifacts: {}
   };
 }
-

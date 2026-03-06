@@ -41,3 +41,8 @@ resolution_policy:
     - ai-generated
   allow_ai_generated: true
   min_trust_score: 0.7
+launchers:
+  continue:
+    run:
+      mode: manual
+      manual_hint: "Set args_template to enable --run for continue."

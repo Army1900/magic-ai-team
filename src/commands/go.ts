@@ -10,7 +10,14 @@ import { exportTeam, validateExportResult, writeExportManifest } from "../core/e
 import { appendWorklogEvent } from "../core/worklog";
 import { buildHandoffPackage, writeHandoffPackage } from "../core/handoff";
 import { EXPORT_TARGET_HELP, normalizeExportTarget } from "../core/targets";
-import { assertRunModeSupported, commandExists, getLauncherHealth, launchTool, resolveToolSpec } from "../core/launchers";
+import {
+  commandExists,
+  executeRunExecutionPlan,
+  getLauncherHealth,
+  launchTool,
+  resolveRunExecutionPlan,
+  resolveToolSpec
+} from "../core/launchers";
 import { banner, error, info, kv, status, success, warn } from "../core/ui";
 import { reportCommandFailure, toErrorMessage } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
@@ -92,7 +99,18 @@ export function registerGoCommand(program: Command): void {
           throw new Error("Failed to initialize go recovery state.");
         }
         recoveryPath = recoveryPath || saveGoRecovery(recovery);
-        assertRunModeSupported(target, runInput);
+        const runPlanForGo = runInput
+          ? resolveRunExecutionPlan({
+              target,
+              tool: resolveToolSpec(target, options.toolCmd ? String(options.toolCmd) : undefined),
+              prompt: "",
+              promptFile: "",
+              projectPath
+            })
+          : null;
+        if (runInput && !runPlanForGo?.supported) {
+          throw new Error(runPlanForGo?.reason ?? `Target '${target}' cannot run in --run mode.`);
+        }
 
         let upResult: UpFlowResult = {
           ok: true,
@@ -238,7 +256,7 @@ export function registerGoCommand(program: Command): void {
           ? {
               root: "",
               brief: recovery.artifacts.handoff_brief,
-              prompt: "",
+              prompt: recovery.artifacts.handoff_prompt ?? "",
               meta: ""
             }
           : null;
@@ -258,6 +276,7 @@ export function registerGoCommand(program: Command): void {
           });
           recovery.phase = "start";
           recovery.artifacts.handoff_brief = handoffPaths.brief;
+          recovery.artifacts.handoff_prompt = handoffPaths.prompt;
           saveGoRecovery(recovery);
         }
 
@@ -265,6 +284,15 @@ export function registerGoCommand(program: Command): void {
         let startExitCode: number | null = recovery.artifacts.start_exit_code ?? null;
         if (shouldStart) {
           const toolSpec = resolveToolSpec(target, options.toolCmd ? String(options.toolCmd) : undefined);
+          const runPlan = runInput
+            ? resolveRunExecutionPlan({
+                target,
+                tool: toolSpec,
+                prompt: buildHandoffPackage(team, target).prompt,
+                promptFile: handoffPaths.prompt,
+                projectPath
+              })
+            : null;
           if (!autoYes) {
             const ok = await confirmStart(`Start team in ${projectPath} using ${toolSpec.command}?`);
             if (!ok) {
@@ -273,11 +301,23 @@ export function registerGoCommand(program: Command): void {
               warn(`Tool command not found: ${toolSpec.command}`);
               info(`Use --tool-cmd to override. Example: openteam go --project ${projectPath} --tool-cmd "claude"`);
             } else {
-              const execution = launchTool(toolSpec, {
-                cwd: projectPath,
-                runMode: runInput,
-                prompt: buildHandoffPackage(team, target).prompt
-              });
+              const execution = runInput
+                ? executeRunExecutionPlan(
+                    runPlan ?? {
+                      supported: false,
+                      strategy: "manual",
+                      command: toolSpec.command,
+                      args: toolSpec.args,
+                      prompt: "",
+                      reason: "run plan missing"
+                    },
+                    projectPath
+                  )
+                : launchTool(toolSpec, {
+                    cwd: projectPath,
+                    runMode: false,
+                    prompt: buildHandoffPackage(team, target).prompt
+                  });
               if (execution.error) {
                 throw execution.error;
               }
@@ -300,11 +340,23 @@ export function registerGoCommand(program: Command): void {
           } else if (!commandExists(toolSpec.command)) {
             warn(`Tool command not found: ${toolSpec.command}`);
           } else {
-            const execution = launchTool(toolSpec, {
-              cwd: projectPath,
-              runMode: runInput,
-              prompt: buildHandoffPackage(team, target).prompt
-            });
+            const execution = runInput
+              ? executeRunExecutionPlan(
+                  runPlan ?? {
+                    supported: false,
+                    strategy: "manual",
+                    command: toolSpec.command,
+                    args: toolSpec.args,
+                    prompt: "",
+                    reason: "run plan missing"
+                  },
+                  projectPath
+                )
+              : launchTool(toolSpec, {
+                  cwd: projectPath,
+                  runMode: false,
+                  prompt: buildHandoffPackage(team, target).prompt
+                });
             if (execution.error) {
               throw execution.error;
             }

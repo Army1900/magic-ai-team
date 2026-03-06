@@ -190,7 +190,31 @@ openteam start --project D:\Projects\my-app --tool-cmd "claude"
 
 `--run` note:
 - Supported for `opencode/openclaw/claude/codex/aider` via stdin prompt injection.
-- For `continue/cline/openhands/tabby`, use `start` without `--run` and execute prompt manually in that tool.
+- For `continue/cline/openhands/tabby`, default is manual mode unless you configure launcher run args in `openteam.yaml`.
+
+Example launcher run adapter config:
+
+```yaml
+launchers:
+  continue:
+    run:
+      mode: args
+      args_template:
+        - run
+        - --prompt-file
+        - "{prompt_file}"
+  cline:
+    run:
+      mode: args
+      args_template:
+        - --prompt-file
+        - "{prompt_file}"
+```
+
+Supported placeholders in `args_template`:
+- `{prompt}` full prompt text
+- `{prompt_file}` path to `.openteam/handoff/START_PROMPT.md`
+- `{project}` project path
 
 ## Export Output
 
