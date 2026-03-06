@@ -36,6 +36,7 @@ npx openteam --help
 
 ```bash
 openteam quickstart
+openteam go --project D:\Projects\my-app --target claude
 openteam status
 openteam export --target claude --out D:\Projects\my-app
 openteam handoff --project D:\Projects\my-app
@@ -89,6 +90,10 @@ Command notes:
 ### 1) Guided Bootstrap / One-Command
 
 ```bash
+openteam go --project D:\Projects\my-app --target claude
+openteam go --project D:\Projects\my-app --target claude --non-interactive --yes
+openteam go --project D:\Projects\my-app --target claude --no-start
+
 openteam quickstart
 openteam quickstart --target claude --out D:\Projects\my-app
 openteam quickstart --verbose
@@ -395,6 +400,7 @@ openteam create mcp --from-api "https://api.example.com/openapi.json" --attach
 ## Command Cheatsheet
 
 - `quickstart`: Beginner entrypoint; guided team setup with optional export.
+- `go`: One-command orchestrator (`up -> export -> handoff -> start`), best for non-technical users.
 - `up`: Guided setup only (no automatic export); more flexible than quickstart.
 - `team`: Registry operations (create/select/show teams).
 - `status`: Show current team operational summary.

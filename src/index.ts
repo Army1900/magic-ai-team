@@ -25,6 +25,7 @@ import { registerQuickstartCommand } from "./commands/quickstart";
 import { registerMonitorCommand } from "./commands/monitor";
 import { registerHandoffCommand } from "./commands/handoff";
 import { registerStartCommand } from "./commands/start";
+import { registerGoCommand } from "./commands/go";
 
 const program = new Command();
 
@@ -76,6 +77,7 @@ registerQuickstartCommand(program);
 registerMonitorCommand(program);
 registerHandoffCommand(program);
 registerStartCommand(program);
+registerGoCommand(program);
 
 program.parseAsync(process.argv).catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
