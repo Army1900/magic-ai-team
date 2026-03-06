@@ -1,0 +1,28 @@
+{
+  "name": "openteam",
+  "version": "0.1.0",
+  "description": "Model-driven Team OS CLI",
+  "private": true,
+  "main": "dist/index.js",
+  "bin": {
+    "openteam": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "validate": "tsx src/index.ts validate",
+    "doctor": "tsx src/index.ts doctor"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "chalk": "^4.1.2",
+    "commander": "^14.0.1",
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

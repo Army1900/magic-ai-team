@@ -1,0 +1,3 @@
+Design an incident response workflow for a small SaaS team.
+Create a weekly content plan for an AI engineering newsletter.
+Propose an onboarding checklist for new backend engineers.
