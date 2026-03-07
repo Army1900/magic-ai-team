@@ -75,6 +75,7 @@ openteam
 openteam go --project D:\Projects\my-app --target opencode
 openteam go --project D:\Projects\my-app --target claude --no-start
 openteam go --project D:\Projects\my-app --target codex --json
+openteam go --project D:\Projects\my-app --view advanced
 openteam go --resume
 ```
 
@@ -89,6 +90,7 @@ openteam go --resume
 - stage hints: `eta~...`, `doing=...`, `next=...`
 - final `Go Summary` card with readiness, quality/risk counts, phase timings
 - `Fix now:` one-line actionable commands
+- output mode switch: `--view simple|advanced` (default: `simple`)
 
 `go --json` also includes:
 

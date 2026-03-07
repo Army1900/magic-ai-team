@@ -26,6 +26,7 @@ import { runExportSelfCheck } from "../core/export-selfcheck";
 import { applyHighRiskOverride, evaluateTeamQuality } from "../core/team-quality";
 import { suggestFixes } from "../core/self-heal";
 import { loadOrCreateOpenTeamConfig, saveOpenTeamConfig } from "../core/marketplace";
+import { buildGoSummary, GoPhase, GoPhaseEvent, PhaseState } from "../core/go-summary";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -36,16 +37,6 @@ async function confirmStart(message: string): Promise<boolean> {
 
 function hasCliFlag(flag: string): boolean {
   return process.argv.includes(flag);
-}
-
-type GoPhase = "up" | "export" | "handoff" | "start";
-type PhaseState = "queued" | "running" | "done" | "fallback" | "failed";
-interface GoPhaseEvent {
-  phase: GoPhase;
-  state: PhaseState;
-  ts: string;
-  elapsed_ms?: number;
-  detail?: string;
 }
 
 function phaseStatusKind(state: PhaseState): "ok" | "warn" | "fail" {
@@ -128,6 +119,7 @@ export function registerGoCommand(program: Command): void {
     .option("--strict", "block on warnings in policy/compatibility", false)
     .option("--strict-target", "block on target validation warnings", false)
     .option("--ignore-high-risk", "do not block high-risk findings from quality audit", false)
+    .option("--view <mode>", "simple|advanced output verbosity", "simple")
     .option("--verbose", "show detailed output", false)
     .option("--tool-cmd <command>", "override launch command, e.g. \"claude\"")
     .option("--run", "attempt one-shot run by piping START_PROMPT to tool stdin", false)
@@ -169,6 +161,7 @@ export function registerGoCommand(program: Command): void {
         const ignoreHighRisk = Boolean(options.ignoreHighRisk);
         const shouldStart = options.json ? false : shouldStartInput;
         const autoYes = options.json ? true : Boolean(options.yes);
+        const viewMode = String(options.view ?? "simple").toLowerCase() === "advanced" ? "advanced" : "simple";
         const phaseOrder: GoPhase[] = ["up", "export", "handoff", "start"];
         const phaseStartedAt = new Map<GoPhase, number>();
         phaseTimeline = [];
@@ -187,6 +180,7 @@ export function registerGoCommand(program: Command): void {
             detail
           });
           if (!options.json) {
+            if (viewMode === "simple" && state === "queued") return;
             const elapsed = elapsedMs !== undefined ? ` elapsed=${elapsedMs}ms` : "";
             const eta = state === "running" ? ` eta~${phaseEtaMs(phase)}ms` : "";
             const next = state === "running" || state === "done" || state === "fallback" ? ` next=${phaseNext(phase)}` : "";
@@ -674,6 +668,21 @@ export function registerGoCommand(program: Command): void {
             .filter((x): x is string => Boolean(x)),
           ...suggestFixes(topIssues.map((i) => i.message).join(" | "))
         ].filter((x, idx, arr) => arr.indexOf(x) === idx).slice(0, 3);
+        const summary = buildGoSummary({
+          readyToStart,
+          qualityOverall: quality.scores.overall,
+          qualityWarns: qualityWarns.length,
+          scannerWarns: scannerWarns.length,
+          scannerFails: scannerFails.length,
+          changes: {
+            agents: team.execution_plane.agents.length,
+            skills: team.resources.skills.length,
+            mcps: team.resources.mcps.length
+          },
+          phaseTimeline,
+          topIssues,
+          quickFixes
+        });
 
         const payload = successPayload({
           team_slug: String(upResult.team_slug),
@@ -685,20 +694,7 @@ export function registerGoCommand(program: Command): void {
           handoff_paths: handoffPaths ?? undefined,
           phase_timeline: phaseTimeline,
           quality: { ...quality, findings: qualityFindings },
-          summary: {
-            ready_to_start: readyToStart,
-            quality_overall: quality.scores.overall,
-            quality_warns: qualityWarns.length,
-            scanner_warns: scannerWarns.length,
-            scanner_fails: scannerFails.length,
-            changes: {
-              agents: team.execution_plane.agents.length,
-              skills: team.resources.skills.length,
-              mcps: team.resources.mcps.length
-            },
-            top_issues: topIssues,
-            quick_fixes: quickFixes
-          },
+          summary,
           started,
           start_exit_code: startExitCode,
           recovery: recoveryPath
@@ -723,28 +719,30 @@ export function registerGoCommand(program: Command): void {
           info(say(locale, `Next: openteam start --project ${projectPath}`, `下一步: openteam start --project ${projectPath}`));
         }
         banner(say(locale, "Go Summary", "Go 摘要"), String(upResult.team_slug));
-        kv("ready_to_start", readyToStart);
-        kv("quality_overall", quality.scores.overall);
-        kv("quality_warns", qualityWarns.length);
-        kv("scanner_warns", scannerWarns.length);
-        kv("scanner_fails", scannerFails.length);
-        kv("agents", team.execution_plane.agents.length);
-        kv("skills", team.resources.skills.length);
-        kv("mcps", team.resources.mcps.length);
-        for (const phase of phaseOrder) {
-          const doneEvent = [...phaseTimeline].reverse().find((e) => e.phase === phase && e.elapsed_ms !== undefined);
-          if (doneEvent?.elapsed_ms !== undefined) {
-            kv(`phase_${phase}_ms`, doneEvent.elapsed_ms);
+        kv("ready_to_start", summary.ready_to_start);
+        kv("quality_overall", summary.quality_overall);
+        if (viewMode === "advanced") {
+          kv("quality_warns", summary.quality_warns);
+          kv("scanner_warns", summary.scanner_warns);
+          kv("scanner_fails", summary.scanner_fails);
+          kv("agents", summary.changes.agents);
+          kv("skills", summary.changes.skills);
+          kv("mcps", summary.changes.mcps);
+          for (const phase of phaseOrder) {
+            const ms = summary.phase_durations_ms[phase];
+            if (typeof ms === "number") {
+              kv(`phase_${phase}_ms`, ms);
+            }
+          }
+          if (summary.top_issues.length > 0) {
+            info(say(locale, "Top issues:", "主要问题:"));
+            for (const issue of summary.top_issues) {
+              status("warn", issue.code, issue.message);
+            }
           }
         }
-        if (topIssues.length > 0) {
-          info(say(locale, "Top issues:", "主要问题:"));
-          for (const issue of topIssues) {
-            status("warn", issue.code, issue.message);
-          }
-        }
-        if (quickFixes.length > 0) {
-          for (const fix of quickFixes) {
+        if (summary.quick_fixes.length > 0) {
+          for (const fix of summary.quick_fixes) {
             info(`Fix now: ${fix}`);
           }
         }
