@@ -12,7 +12,7 @@ import { assessGateFindings } from "../core/gates";
 import { reportCommandFailure } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
 import { runExportSelfCheck } from "../core/export-selfcheck";
-import { applyHighRiskOverride, evaluateTeamQuality } from "../core/team-quality";
+import { evaluateTeamQualityGate } from "../core/quality-gate";
 import { resolveLocale, t } from "../core/i18n";
 
 function resolveTeamFileFromOptions(options: { team?: string; file?: string }): string {
@@ -45,33 +45,35 @@ export function registerExportCommand(program: Command): void {
         const skipPolicyGate = Boolean(options.skipPolicyGate);
         const ignoreHighRisk = Boolean(options.ignoreHighRisk);
 
-        const quality = evaluateTeamQuality(team, { projectPath: options.out, includeScanners: true });
-        const qualityFindings = applyHighRiskOverride(quality.findings, ignoreHighRisk);
-        const qualityFails = qualityFindings.filter((f) => f.severity === "fail");
-        if (qualityFails.length > 0) {
+        const qualityGate = evaluateTeamQualityGate(team, {
+          projectPath: options.out,
+          includeScanners: true,
+          ignoreHighRisk
+        });
+        if (qualityGate.blocked) {
           if (options.json) {
             console.log(toJsonString(failurePayload({
               blocked_by: "team_quality",
               target,
               team_file: teamFile,
-              quality: { ...quality, findings: qualityFindings }
+              quality: { ...qualityGate.report, findings: qualityGate.findings }
             })));
             process.exitCode = 1;
             return;
           }
           error(t(locale, "export_blocked_quality"));
-          for (const finding of qualityFindings) {
+          for (const finding of qualityGate.findings) {
             status(finding.severity, finding.code, finding.message);
           }
           process.exitCode = 1;
           return;
         }
-        for (const finding of qualityFindings) {
+        for (const finding of qualityGate.warns) {
           if (finding.severity === "warn") {
             status("warn", finding.code, finding.message);
           }
         }
-        for (const scanner of quality.scanner_summary) {
+        for (const scanner of qualityGate.report.scanner_summary) {
           status(scanner.status === "fail" ? "fail" : scanner.status === "warn" ? "warn" : "ok", `scanner:${scanner.tool}`, scanner.detail);
         }
 
@@ -190,7 +192,7 @@ export function registerExportCommand(program: Command): void {
             result,
             manifest,
             self_check: selfCheck,
-            quality: { ...quality, findings: qualityFindings }
+            quality: { ...qualityGate.report, findings: qualityGate.findings }
           })));
           return;
         }

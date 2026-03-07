@@ -35,11 +35,17 @@ function clampScore(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+const commandAvailabilityCache = new Map<string, boolean>();
+
 function commandExists(command: string): boolean {
+  const cached = commandAvailabilityCache.get(command);
+  if (typeof cached === "boolean") return cached;
   const check = process.platform === "win32"
     ? spawnSync("where", [command], { stdio: "ignore", shell: true })
     : spawnSync("command", ["-v", command], { stdio: "ignore", shell: true });
-  return check.status === 0;
+  const available = check.status === 0;
+  commandAvailabilityCache.set(command, available);
+  return available;
 }
 
 function costPer1k(model: string): number {
@@ -172,11 +178,13 @@ export function evaluateTeamQuality(team: TeamConfig, options: TeamQualityOption
   findings.push(...semanticFindings(team));
   const scannerDetails = options.includeScanners ? scannerSummary(options.projectPath) : [];
   const scannerOut = scannerDetails.map((row) => ({ ...row }));
-  if (options.includeScanners && options.projectPath) {
+  const projectPath = options.projectPath ? path.resolve(options.projectPath) : undefined;
+  const hasProjectPath = Boolean(projectPath && fs.existsSync(projectPath));
+  if (options.includeScanners && projectPath && hasProjectPath) {
     for (const row of scannerOut) {
       if (!row.available) continue;
       const tool = row.tool as "gitleaks" | "semgrep" | "trivy";
-      const result = runScanner(tool, options.projectPath);
+      const result = runScanner(tool, projectPath);
       row.status = result.status;
       row.detail = result.detail;
       if (result.status === "fail") {
@@ -193,6 +201,13 @@ export function evaluateTeamQuality(team: TeamConfig, options: TeamQualityOption
           message: `${tool}: ${result.detail}`,
           source: "scanner"
         });
+      }
+    }
+  } else if (options.includeScanners && options.projectPath && !hasProjectPath) {
+    for (const row of scannerOut) {
+      if (row.status === "ok" || row.status === "skipped") {
+        row.status = "warn";
+        row.detail = "project path not found";
       }
     }
   }

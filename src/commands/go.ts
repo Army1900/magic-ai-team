@@ -23,12 +23,12 @@ import { reportCommandFailure, toErrorMessage } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
 import { initGoRecovery, loadGoRecoveryAsync, saveGoRecoveryAsync } from "../core/go-recovery";
 import { runExportSelfCheck } from "../core/export-selfcheck";
-import { applyHighRiskOverride, evaluateTeamQuality } from "../core/team-quality";
 import { suggestFixes } from "../core/self-heal";
 import { loadOrCreateOpenTeamConfig, saveOpenTeamConfig } from "../core/marketplace";
 import { buildGoSummary, GoPhase, GoPhaseEvent, PhaseState } from "../core/go-summary";
-import { appendGoHistory } from "../core/go-history";
+import { appendGoHistory, GoHistoryRecord } from "../core/go-history";
 import { Locale, resolveLocale, t } from "../core/i18n";
+import { evaluateTeamQualityGate } from "../core/quality-gate";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -73,6 +73,19 @@ function phaseAction(phase: GoPhase): string {
 
 function say(locale: Locale, en: string, zh: string): string {
   return locale === "zh" ? zh : en;
+}
+
+function appendGoHistorySafe(
+  record: Omit<GoHistoryRecord, "ts"> & { ts?: string },
+  options: { json: boolean; locale: Locale }
+): void {
+  try {
+    appendGoHistory(record);
+  } catch (e) {
+    if (options.json) return;
+    const msg = toErrorMessage(e);
+    status("warn", "GO_HISTORY_WRITE_FAILED", say(options.locale, `history write skipped: ${msg}`, `历史记录写入已跳过: ${msg}`));
+  }
 }
 
 function fixForFindingCode(code: string, projectPath: string, target: string): string | null {
@@ -261,11 +274,12 @@ export function registerGoCommand(program: Command): void {
         await saveGoRecoveryAsync(recovery);
 
         const team = loadTeamConfig(String(upResult.team_file));
-        const quality = evaluateTeamQuality(team, { projectPath, includeScanners: true });
-        let qualityFindings = applyHighRiskOverride(quality.findings, ignoreHighRisk);
-        let qualityFails = qualityFindings.filter((f) => f.severity === "fail");
-        const onlyHighRiskFails = qualityFails.length > 0 && qualityFails.every((f) => f.code.startsWith("HIGH_RISK_"));
-        if (!options.json && !ignoreHighRisk && onlyHighRiskFails) {
+        let qualityGate = evaluateTeamQualityGate(team, {
+          projectPath,
+          includeScanners: true,
+          ignoreHighRisk
+        });
+        if (!options.json && !ignoreHighRisk && qualityGate.onlyHighRiskFails) {
           const goOn = await confirmContinueOnce(
             say(
               locale,
@@ -274,12 +288,15 @@ export function registerGoCommand(program: Command): void {
             )
           );
           if (goOn) {
-            qualityFindings = applyHighRiskOverride(quality.findings, true);
-            qualityFails = qualityFindings.filter((f) => f.severity === "fail");
+            qualityGate = evaluateTeamQualityGate(team, {
+              projectPath,
+              includeScanners: true,
+              ignoreHighRisk: true
+            });
             markPhase("export", "fallback", "high-risk ignored for this run only");
           }
         }
-        if (qualityFails.length > 0) {
+        if (qualityGate.blocked) {
           markPhase("export", "failed", "team quality gate blocked");
           if (options.json) {
             console.log(
@@ -288,7 +305,7 @@ export function registerGoCommand(program: Command): void {
                   blocked_by: "team_quality",
                   team_file: String(upResult.team_file),
                   target: effectiveTarget,
-                  quality: { ...quality, findings: qualityFindings },
+                  quality: { ...qualityGate.report, findings: qualityGate.findings },
                   phase_timeline: phaseTimeline,
                   recovery: recoveryPath
                 })
@@ -298,7 +315,7 @@ export function registerGoCommand(program: Command): void {
             return;
           }
           error(say(locale, "Go blocked by team quality gate before export.", "Go 在导出前被团队质量门禁阻断。"));
-          for (const finding of qualityFindings) {
+          for (const finding of qualityGate.findings) {
             status(finding.severity, finding.code, finding.message);
           }
           recovery.status = "failed";
@@ -309,12 +326,10 @@ export function registerGoCommand(program: Command): void {
           return;
         }
         if (!options.json) {
-          for (const finding of qualityFindings) {
-            if (finding.severity === "warn") {
-              status("warn", finding.code, finding.message);
-            }
+          for (const finding of qualityGate.warns) {
+            status("warn", finding.code, finding.message);
           }
-          for (const scanner of quality.scanner_summary) {
+          for (const scanner of qualityGate.report.scanner_summary) {
             status(scanner.status === "warn" ? "warn" : "ok", `scanner:${scanner.tool}`, scanner.detail);
           }
         }
@@ -642,10 +657,10 @@ export function registerGoCommand(program: Command): void {
 
         recovery.status = "completed";
         await saveGoRecoveryAsync(recovery);
-        const qualityWarns = qualityFindings.filter((f) => f.severity === "warn");
-        const scannerWarns = quality.scanner_summary.filter((s) => s.status === "warn");
-        const scannerFails = quality.scanner_summary.filter((s) => s.status === "fail");
-        const readyToStart = Boolean(preflight?.available ?? true) && qualityFindings.every((f) => f.severity !== "fail");
+        const qualityWarns = qualityGate.warns;
+        const scannerWarns = qualityGate.report.scanner_summary.filter((s) => s.status === "warn");
+        const scannerFails = qualityGate.report.scanner_summary.filter((s) => s.status === "fail");
+        const readyToStart = Boolean(preflight?.available ?? true) && !qualityGate.blocked;
         const topIssues = [
           ...qualityWarns.map((f) => ({ code: f.code, message: f.message })),
           ...scannerWarns.map((s) => ({ code: `SCANNER_${s.tool.toUpperCase()}_WARN`, message: `${s.tool}: ${s.detail}` })),
@@ -659,7 +674,7 @@ export function registerGoCommand(program: Command): void {
         ].filter((x, idx, arr) => arr.indexOf(x) === idx).slice(0, 3);
         const summary = buildGoSummary({
           readyToStart,
-          qualityOverall: quality.scores.overall,
+          qualityOverall: qualityGate.report.scores.overall,
           qualityWarns: qualityWarns.length,
           scannerWarns: scannerWarns.length,
           scannerFails: scannerFails.length,
@@ -682,7 +697,7 @@ export function registerGoCommand(program: Command): void {
           manifest,
           handoff_paths: handoffPaths ?? undefined,
           phase_timeline: phaseTimeline,
-          quality: { ...quality, findings: qualityFindings },
+          quality: { ...qualityGate.report, findings: qualityGate.findings },
           summary,
           started,
           start_exit_code: startExitCode,
@@ -739,7 +754,7 @@ export function registerGoCommand(program: Command): void {
           t(locale, "go_next_monitor", { project: projectPath })
         );
         success(t(locale, "go_finished"));
-        appendGoHistory({
+        appendGoHistorySafe({
           status: "ok",
           target: effectiveTarget,
           project: projectPath,
@@ -751,7 +766,7 @@ export function registerGoCommand(program: Command): void {
             quality_overall: summary.quality_overall,
             top_issue_codes: summary.top_issues.map((x) => x.code)
           }
-        });
+        }, { json: Boolean(options.json), locale });
         cfg.preferences = {
           ...(cfg.preferences ?? {}),
           last_target: effectiveTarget,
@@ -767,7 +782,7 @@ export function registerGoCommand(program: Command): void {
           recovery.last_error = toErrorMessage(e);
           await saveGoRecoveryAsync(recovery);
         }
-        appendGoHistory({
+        appendGoHistorySafe({
           status: "fail",
           target: targetMaybe,
           project: projectMaybe,
@@ -775,7 +790,7 @@ export function registerGoCommand(program: Command): void {
           team_file: recovery?.artifacts.team_file,
           recovery: recoveryPath || undefined,
           error: toErrorMessage(e)
-        });
+        }, { json: Boolean(options.json), locale: resolveLocale(`${options?.name ?? ""} ${options?.goal ?? ""}`) });
         if (options.json) {
           console.log(
             toJsonString(
