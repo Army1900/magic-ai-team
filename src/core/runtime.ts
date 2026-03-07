@@ -29,6 +29,28 @@ function modelCostPer1kTokens(model: string): number {
   return 0.006;
 }
 
+function chooseBudgetAwareModelOrder(
+  models: string[],
+  spent: number,
+  budget: number,
+  onBudgetExceed: string
+): { ordered: string[]; downgraded: boolean } {
+  if (models.length <= 1 || budget <= 0) {
+    return { ordered: models, downgraded: false };
+  }
+  const shouldDowngrade = onBudgetExceed === "downgrade_model" && spent >= budget * 0.8;
+  if (!shouldDowngrade) {
+    return { ordered: models, downgraded: false };
+  }
+  const mini = models.filter((m) => m.toLowerCase().includes("mini"));
+  const other = models.filter((m) => !m.toLowerCase().includes("mini"));
+  if (mini.length === 0) {
+    return { ordered: models, downgraded: false };
+  }
+  const ordered = [...mini, ...other];
+  return { ordered, downgraded: ordered[0] !== models[0] };
+}
+
 export function executeTask(team: TeamConfig, task: string, mode: "run" | "simulate"): RunArtifact {
   const taskWeight = clamp(Math.ceil(task.length / 80), 1, 12);
   let totalLatency = 0;
@@ -104,9 +126,31 @@ export async function executeTaskWithModels(
   let failureReason: string | undefined;
   let currentInput = task;
   const contextText = loadContextText(team);
+  const budget = team.policies.budget.max_cost_usd_per_run;
+  const warnThreshold = Number((budget * 0.8).toFixed(4));
+  const budgetAlerts: string[] = [];
+  let downgradeActions = 0;
 
   for (const agent of team.execution_plane.agents) {
-    const tryModels = [agent.model.primary, ...(agent.model.fallback ?? [])];
+    const baseModels = [agent.model.primary, ...(agent.model.fallback ?? [])];
+    if (totalCost >= warnThreshold) {
+      budgetAlerts.push(
+        `budget warning before agent '${agent.id}': spent=${totalCost.toFixed(4)}, threshold=${warnThreshold.toFixed(4)}`
+      );
+    }
+    const budgetModelPlan = chooseBudgetAwareModelOrder(
+      baseModels,
+      totalCost,
+      budget,
+      String(team.fallback.on_budget_exceed ?? "")
+    );
+    if (budgetModelPlan.downgraded) {
+      downgradeActions += 1;
+      budgetAlerts.push(
+        `downgrade applied for agent '${agent.id}': ${baseModels[0]} -> ${budgetModelPlan.ordered[0]}`
+      );
+    }
+    const tryModels = budgetModelPlan.ordered;
     let done = false;
     const errors: string[] = [];
 
@@ -129,6 +173,7 @@ export async function executeTaskWithModels(
         steps.push({
           agent_id: agent.id,
           model,
+          budget_action: budgetModelPlan.downgraded && model === tryModels[0] ? "downgraded" : "none",
           status: "ok",
           latency_ms: result.latency_ms,
           estimated_tokens: result.tokens,
@@ -151,6 +196,7 @@ export async function executeTaskWithModels(
       steps.push({
         agent_id: agent.id,
         model: tryModels[0] ?? "unknown",
+        budget_action: budgetModelPlan.downgraded ? "downgraded" : "none",
         status: "fail",
         latency_ms: 0,
         estimated_tokens: 0,
@@ -161,7 +207,6 @@ export async function executeTaskWithModels(
     }
   }
 
-  const budget = team.policies.budget.max_cost_usd_per_run;
   const latencyMax = team.policies.latency.p95_ms_max;
   if (pipelineSuccess && totalCost > budget) {
     pipelineSuccess = false;
@@ -183,6 +228,12 @@ export async function executeTaskWithModels(
       latency_ms: totalLatency,
       estimated_tokens: totalTokens,
       estimated_cost_usd: Number(totalCost.toFixed(4))
+    },
+    budget_monitor: {
+      budget_usd: Number(budget.toFixed(4)),
+      warn_threshold_usd: warnThreshold,
+      alerts: budgetAlerts,
+      downgrade_actions: downgradeActions
     },
     steps,
     failure_reason: failureReason

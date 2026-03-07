@@ -11,6 +11,8 @@ import { EXPORT_TARGET_HELP, ExportTarget, normalizeExportTarget } from "../core
 import { assessGateFindings } from "../core/gates";
 import { reportCommandFailure } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
+import { runExportSelfCheck } from "../core/export-selfcheck";
+import { applyHighRiskOverride, evaluateTeamQuality } from "../core/team-quality";
 
 function resolveTeamFileFromOptions(options: { team?: string; file?: string }): string {
   return resolveTeamFileOrThrow(options);
@@ -29,6 +31,7 @@ export function registerExportCommand(program: Command): void {
     .option("--skip-policy-gate", "skip policy checks before export", false)
     .option("--mapper-model <model>", "override exporter mapper model")
     .option("--mapper-execution-mode <mode>", "mock|live", "mock")
+    .option("--ignore-high-risk", "do not block high-risk findings from quality audit", false)
     .option("--json", "json output mode", false)
     .action(async (options) => {
       try {
@@ -38,6 +41,37 @@ export function registerExportCommand(program: Command): void {
 
         const strict = Boolean(options.strict);
         const skipPolicyGate = Boolean(options.skipPolicyGate);
+        const ignoreHighRisk = Boolean(options.ignoreHighRisk);
+
+        const quality = evaluateTeamQuality(team, { projectPath: options.out, includeScanners: true });
+        const qualityFindings = applyHighRiskOverride(quality.findings, ignoreHighRisk);
+        const qualityFails = qualityFindings.filter((f) => f.severity === "fail");
+        if (qualityFails.length > 0) {
+          if (options.json) {
+            console.log(toJsonString(failurePayload({
+              blocked_by: "team_quality",
+              target,
+              team_file: teamFile,
+              quality: { ...quality, findings: qualityFindings }
+            })));
+            process.exitCode = 1;
+            return;
+          }
+          error("Export blocked by team quality gate.");
+          for (const finding of qualityFindings) {
+            status(finding.severity, finding.code, finding.message);
+          }
+          process.exitCode = 1;
+          return;
+        }
+        for (const finding of qualityFindings) {
+          if (finding.severity === "warn") {
+            status("warn", finding.code, finding.message);
+          }
+        }
+        for (const scanner of quality.scanner_summary) {
+          status(scanner.status === "fail" ? "fail" : scanner.status === "warn" ? "warn" : "ok", `scanner:${scanner.tool}`, scanner.detail);
+        }
 
         if (!skipPolicyGate) {
           const policy = evaluatePolicies(team);
@@ -145,13 +179,16 @@ export function registerExportCommand(program: Command): void {
         }
 
         const manifest = writeExportManifest(options.out, result, teamFile);
+        const selfCheck = runExportSelfCheck(result, target);
 
         if (options.json) {
           console.log(toJsonString(successPayload({
             team_file: teamFile,
             target,
             result,
-            manifest
+            manifest,
+            self_check: selfCheck,
+            quality: { ...quality, findings: qualityFindings }
           })));
           return;
         }
@@ -170,6 +207,16 @@ export function registerExportCommand(program: Command): void {
           }
         } else {
           success("No compatibility warnings.");
+        }
+        info("Post-export self-check:");
+        for (const finding of selfCheck.findings) {
+          status(finding.severity, finding.code, finding.message);
+        }
+        if (selfCheck.ok) {
+          success(`Export self-check passed. ${target} is ready for out-of-box startup.`);
+        } else {
+          error(`Export self-check failed. Fix findings before starting ${target}.`);
+          process.exitCode = 1;
         }
       } catch (e) {
         reportCommandFailure({

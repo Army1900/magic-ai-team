@@ -1,16 +1,33 @@
 # OpenTeam v0.1
 
-Model-driven Team OS CLI for creating and managing AI agent teams.
+Model-driven Team OS CLI for designing, governing, and exporting multi-agent teams.
 
-## What It Does
+## What OpenTeam Is
 
-- Guided team bootstrap (`openteam up`)
-- Team registry management in `OPENTEAM_HOME`
-- Policy/compatibility gates before export
-- Run -> evaluate -> optimize loop
-- Export to `opencode`, `openclaw`, `claude`, `codex`, `aider`, `continue`, `cline`, `openhands`, `tabby`
-- Provider-centric model management (`current_provider` + `providers.<provider>.models`)
-- Project worklog and progress monitoring (`<project>/.openteam/worklog`)
+OpenTeam is not another single-agent runner. It is a Team OS layer on top of target frameworks.
+
+- Designs multi-agent topology from discovery.
+- Binds skills and MCPs to specific agents.
+- Applies policy, quality, and compatibility gates before export/start.
+- Exports ready-to-import bundles for mainstream agent frameworks.
+
+## Key Features
+
+- One-command flow: `up -> export -> handoff -> start` via `openteam go`.
+- Discovery + capability-domain-first topology design (AI-first, fallback rules).
+- Resource recommendation with feedback loop (run outcomes feed future ranking).
+- Agent quality evaluation after run (contract/format/risk checks).
+- Export self-check and team quality audit.
+- Project worklog with cost/token/latency metrics.
+- Recovery checkpoint with `go --resume`.
+
+## Safety Defaults
+
+Default behavior is conservative:
+
+- High-risk findings are blocked by default in `go` and `export`.
+- To continue anyway, pass `--ignore-high-risk`.
+- Export still runs policy gate, target compatibility gate, target validation, and self-check.
 
 ## Prerequisites
 
@@ -32,7 +49,7 @@ Without global link:
 npx openteam --help
 ```
 
-## 3-Minute Quick Start
+## Quick Start
 
 ```bash
 openteam
@@ -40,499 +57,177 @@ openteam go --project D:\Projects\my-app --target claude
 openteam monitor status --project D:\Projects\my-app
 ```
 
-Beginner default:
-- running `openteam` with no subcommand defaults to `openteam go`.
-- `go` is the primary entrypoint for non-technical users.
-- It orchestrates `up -> export -> handoff -> start`.
-- Use `--no-start` if you only want setup artifacts.
+Notes:
 
-## Default Workspace (`OPENTEAM_HOME`)
+- Running `openteam` (no subcommand) defaults to `go`.
+- `go` is the primary entrypoint.
+- Use `--no-start` if you only want generated artifacts.
 
-OpenTeam stores teams in a central home directory:
+## Main Commands
 
-1. Use `OPENTEAM_HOME` if set
-2. Otherwise use:
-   - Windows: `%USERPROFILE%\.openteam`
-   - macOS/Linux: `~/.openteam`
+### Bootstrap / Go
 
-Layout:
+```bash
+openteam
+openteam go --project D:\Projects\my-app --target opencode
+openteam go --project D:\Projects\my-app --target claude --no-start
+openteam go --project D:\Projects\my-app --target codex --json
+openteam go --resume
+```
 
+`go --json` includes structured phase timeline:
+
+- `phase_timeline[]` events with `phase/state/ts/elapsed_ms/detail`
+- phases: `up`, `export`, `handoff`, `start`
+- states: `queued`, `running`, `done`, `fallback`, `failed`
+
+### Up (guided team creation)
+
+```bash
+openteam up
+openteam up --name "My Team" --goal "Improve QA and release safety" --target openclaw
+openteam up --non-interactive --allow-mock
+```
+
+### Run / Evaluate / Optimize
+
+```bash
+openteam run --task "Draft release checklist" --execution-mode live --project D:\Projects\my-app
+openteam evaluate --run <run_id>
+openteam optimize --run <run_id> --apply
+```
+
+`run` now records:
+
+- per-agent tokens/cost/latency
+- budget alerts and downgrade actions
+- quality findings per agent
+
+### Export
+
+```bash
+openteam export --target opencode --out D:\Projects\my-app
+openteam export --target claude --out D:\Projects\my-app --strict-target
+openteam export --target codex --out D:\Projects\my-app --ignore-high-risk
+```
+
+`export` now runs:
+
+1. Team quality gate (high-risk blocked by default)
+2. Policy gate
+3. Target compatibility gate
+4. Target validation
+5. Export self-check (files/json/launcher readiness)
+
+## Team Quality Audit
+
+OpenTeam quality audit includes:
+
+- Efficiency score
+- Performance score
+- Security score
+- Overall score
+- Findings by source: `policy`, `semantic`, `scanner`
+
+Scanner integration in current version:
+
+- Detects tool availability (`gitleaks`, `semgrep`, `trivy`)
+- Reports status in quality output
+- Deep scanning command execution is reserved for next stage
+
+## Resource Recommendation Feedback Loop
+
+OpenTeam continuously updates recommendation priorities:
+
+- On resource attach: increments adoption stats.
+- On run completion: writes success/cost/token feedback for used skills/MCPs.
+- On next recommendation: applies feedback score delta to ranking.
+
+Feedback store path:
+
+- `<OPENTEAM_HOME>/resource-feedback.json`
+
+## Agent Quality Evaluation
+
+After each run, OpenTeam evaluates per-agent minimum acceptance:
+
+- contract presence (`input_contract`, `output_contract`)
+- output format mismatch for structured contracts
+- step execution status
+- high-risk resource and policy conflict
+
+If quality gate fails in `run`, process exits non-zero.
+
+## Export Targets
+
+Supported targets:
+
+- `opencode`
+- `openclaw`
+- `claude`
+- `codex`
+- `aider`
+- `continue`
+- `cline`
+- `openhands`
+- `tabby`
+
+All targets export a formal bundle by default:
+
+- `.<target>/agents.json`
+- `.<target>/skills.json`
+- `.<target>/mcp.json`
+
+Project artifacts:
+
+- `.openteam/exports/manifest.json`
+- `.openteam/handoff/TEAM_BRIEF.md`
+- `.openteam/handoff/START_PROMPT.md`
+- `.openteam/handoff/handoff.json`
+- `.openteam/worklog/*`
+
+## Home and Team Registry
+
+Home resolution:
+
+1. `OPENTEAM_HOME` (if set)
+2. Windows: `%USERPROFILE%\.openteam`
+3. macOS/Linux: `~/.openteam`
+
+Core files:
+
+- `<OPENTEAM_HOME>/openteam.yaml`
 - `<OPENTEAM_HOME>/registry.json`
-- `<OPENTEAM_HOME>/openteam.yaml` (global config, auto-created on first run)
 - `<OPENTEAM_HOME>/teams/<team-slug>/team.yaml`
-- `<OPENTEAM_HOME>/teams/<team-slug>/discovery-summary.md`
-- `<OPENTEAM_HOME>/teams/<team-slug>/planning-note.md`
-- `<OPENTEAM_HOME>/teams/<team-slug>/runs/*.json`
-- `<OPENTEAM_HOME>/teams/<team-slug>/reports/*.json`
-- `<OPENTEAM_HOME>/recovery/go-last.json` (go checkpoint for `--resume`)
+- `<OPENTEAM_HOME>/recovery/go-last.json`
 
-Config location:
-1. `<OPENTEAM_HOME>/openteam.yaml` (auto-created on first run)
-2. Use `--config <path>` on specific commands when you need a custom config file
-
-## Team Registry Commands
+Team registry commands:
 
 ```bash
 openteam team create --name "Support Team" --goal "Automate support triage"
 openteam team list
 openteam team use --name support-team
 openteam team current
-openteam team show --name support-team
-openteam team path --name support-team
 ```
 
-Command notes:
-- `team create`: Create a team in the central registry (`OPENTEAM_HOME`).
-- `team list`: List all teams in the registry.
-- `team use`: Set the current team (most commands use this by default).
-- `team current`: Show the currently selected team.
-- `team show`: Show details for one team.
-- `team path`: Print only the `team.yaml` path (useful for scripts).
-
-## Main Workflow
-
-### 1) Guided Bootstrap / One-Command
-
-```bash
-openteam
-openteam go --project D:\Projects\my-app --target claude
-openteam go --project D:\Projects\my-app --target claude --non-interactive --yes
-openteam go --project D:\Projects\my-app --target claude --no-start
-openteam go --project D:\Projects\my-app --target claude --json
-openteam go --project D:\Projects\my-app --target claude --force
-openteam go --project D:\Projects\my-app --target claude --allow-mock
-openteam go --resume
-openteam launcher check
-openteam launcher check --target claude
-openteam launcher check --target claude --json
-openteam up
-openteam up --name "My Team" --goal "Automate support triage" --target opencode
-openteam up --name "My Team" --goal "Automate support triage" --target opencode --non-interactive
-openteam up --name "My Team" --goal "Automate support triage" --target opencode --force
-openteam up --name "My Team" --goal "Automate support triage" --target opencode --allow-mock
-openteam up --verbose
-```
-
-Flow in `up`:
-- create/use registry team
-- recommend marketplace skill/mcp candidates from discovery and optionally attach
-- dynamically design multi-agent execution topology (AI-first, rule fallback)
-- generate collaboration docs under team `docs/agents/*.md`
-- validate schema
-- policy gate
-- simulate one task
-- evaluate report
-- compatibility check for selected target
-
-Representative rule templates currently include:
-- customer support ops
-- software delivery / QA / release
-- cyber incident response (SOC-like)
-- supply chain planning
-- healthcare safety / pharmacovigilance
-- finance risk control (fraud / AML / KYC)
-- ecommerce operations (catalog / demand / fulfillment)
-- education content production (curriculum / lesson / assessment)
-- legal contract review (clause / compliance / negotiation)
-
-`go` notes:
-- includes launcher precheck signal for the selected target
-- in `--json` mode output is machine-readable only (no extra text)
-- supports checkpoint resume via `--resume` (uses `OPENTEAM_HOME/recovery/go-last.json`)
-- command failures now print auto-fix suggestions (`Fix: ...`) for common issues
-- by default requires AI auth for discovery/planning; use `--allow-mock` only for explicit offline fallback
-
-### 2) Status / Validation
-
-```bash
-openteam status
-openteam validate
-openteam doctor
-openteam doctor --target claude
-```
-
-Command notes:
-- `status`: Show team health, model setup, policy status, and latest artifacts.
-- `validate`: Validate the team config schema.
-- `doctor`: Run environment/config checks (keys, provider, schema).
-- `doctor --target <target>`: Also check target compatibility and launcher availability.
-
-### 3) Run / Evaluate / Optimize
-
-```bash
-openteam run --task "Draft a support escalation policy" --execution-mode mock
-openteam evaluate --run <run_id>
-openteam optimize --run <run_id> --apply
-openteam run --task "Draft a support escalation policy" --execution-mode live --project D:\Projects\my-app
-```
-
-Command notes:
-- `run`: Execute one task (`mock|live`).
-- `evaluate`: Score a run and generate an evaluation report.
-- `optimize`: Generate optimization changes from run data; `--apply` persists them.
-- Add `--project <path>` to write operation events into that project's `.openteam/worklog`.
-
-### 4) Export to Framework
-
-```bash
-openteam export --target opencode --out D:\Projects\my-app
-openteam export --target openclaw --out D:\Projects\my-app
-openteam export --target claude --out D:\Projects\my-app
-openteam export --target codex --out D:\Projects\my-app
-openteam export --target aider --out D:\Projects\my-app
-openteam export --target continue --out D:\Projects\my-app
-openteam export --target cline --out D:\Projects\my-app
-openteam export --target openhands --out D:\Projects\my-app
-openteam export --target tabby --out D:\Projects\my-app
-```
-
-With strict gate:
-
-```bash
-openteam export --target claude --out D:\Projects\my-app --strict
-openteam export --target codex --out D:\Projects\my-app --strict-target
-```
-
-### 5) Handoff and Start Team Work
-
-```bash
-# Generate handoff package (brief + start prompt)
-openteam handoff --project D:\Projects\my-app
-
-# Start target tool (default: detect target from latest export manifest)
-openteam start --project D:\Projects\my-app
-
-# Preview only
-openteam start --project D:\Projects\my-app --dry-run
-
-# Attempt one-shot run by piping START_PROMPT to tool stdin
-openteam start --project D:\Projects\my-app --run --yes
-
-# Override launch command if needed
-openteam start --project D:\Projects\my-app --tool-cmd "claude"
-```
-
-`--run` note:
-- Supported for `opencode/openclaw/claude/codex/aider` via stdin prompt injection.
-- For `continue/cline/openhands/tabby`, default is manual mode unless you configure launcher run args in `<OPENTEAM_HOME>/openteam.yaml`.
-
-Example launcher run adapter config:
-
-```yaml
-launchers:
-  continue:
-    run:
-      mode: args
-      args_template:
-        - run
-        - --prompt-file
-        - "{prompt_file}"
-  cline:
-    run:
-      mode: args
-      args_template:
-        - --prompt-file
-        - "{prompt_file}"
-```
-
-Supported placeholders in `args_template`:
-- `{prompt}` full prompt text
-- `{prompt_file}` path to `.openteam/handoff/START_PROMPT.md`
-- `{project}` project path
-
-## Export Output
-
-- `opencode` -> `.opencode/team.json` + `.opencode/agents.json` + `.opencode/skills.json`
-- `opencode` MCP -> `.opencode/mcp.json`
-- `openclaw` -> `.openclaw/openclaw.team.yaml`
-- `openclaw` MCP -> `.openclaw/mcp.openclaw.yaml`
-- `claude` -> `.claude/agents.json` + `.claude/skills.json`
-- `claude` MCP -> `.claude/mcp.json`
-- `codex` -> `.codex/agents.json` + `.codex/skills.json` + `.codex/codex.team.json`
-- `codex` MCP -> `.codex/mcp.json`
-- `aider` -> `.aider/aider.team.json`
-- `aider` MCP -> `.aider/mcp.json`
-- `continue` -> `.continue/config.yaml`
-- `continue` MCP -> `.continue/mcp.json`
-- `cline` -> `.cline/agents.json`
-- `cline` MCP -> `.cline/mcp.json`
-- `openhands` -> `.openhands/workflow.json`
-- `openhands` MCP -> `.openhands/mcp.json`
-- `tabby` -> `.tabby/tabby.team.json`
-- `tabby` MCP -> `.tabby/mcp.json`
-- all targets include formal bundle by default -> `.<target>/agents.json` + `.<target>/skills.json` + `.<target>/mcp.json`
-- manifest -> `.openteam/exports/manifest.json`
-- handoff package ->
-  - `.openteam/handoff/TEAM_BRIEF.md`
-  - `.openteam/handoff/START_PROMPT.md`
-  - `.openteam/handoff/handoff.json`
-- project worklog (auto-initialized) ->
-  - `.openteam/worklog/events.jsonl`
-  - `.openteam/worklog/daily/YYYY-MM-DD.md`
-  - `.openteam/worklog/summary.json`
-  - `.openteam/templates/progress-report.md` (editable report template)
-  - includes `run_step` events with per-agent `tokens/cost_usd/latency_ms`
-
-## Minimal Export Scenarios (Copy/Paste)
-
-Use one of these after `openteam`/`openteam go` (or `openteam up`) to generate target-ready files:
-
-```bash
-# Aider
-openteam export --target aider --out D:\Projects\my-app --strict-target
-# Output: .aider/aider.team.json + .aider/mcp.json
-
-# Continue
-openteam export --target continue --out D:\Projects\my-app --strict-target
-# Output: .continue/config.yaml + .continue/mcp.json
-
-# Cline
-openteam export --target cline --out D:\Projects\my-app --strict-target
-# Output: .cline/agents.json + .cline/mcp.json
-
-# OpenHands
-openteam export --target openhands --out D:\Projects\my-app --strict-target
-# Output: .openhands/workflow.json + .openhands/mcp.json
-
-# Tabby
-openteam export --target tabby --out D:\Projects\my-app --strict-target
-# Output: .tabby/tabby.team.json + .tabby/mcp.json
-```
-
-## Monitor Team Progress
-
-Worklog is stored in target project path under `.openteam/worklog`.
+## Monitoring
 
 ```bash
 openteam monitor status --project D:\Projects\my-app
 openteam monitor tail --project D:\Projects\my-app -n 30
-openteam monitor report --project D:\Projects\my-app --since 24h
-openteam monitor report --project D:\Projects\my-app --since 24h --md
 openteam monitor report --project D:\Projects\my-app --since 24h --write
-openteam monitor report --project D:\Projects\my-app --since 24h --md --var kpi_owner="Ops Team"
-openteam monitor report --project D:\Projects\my-app --since 24h --write --vars-file .openteam/templates/progress.vars.json
 ```
 
-Command notes:
-- `monitor status`: Show overall worklog health and latest event.
-- `monitor tail`: Show the latest N worklog events.
-- `monitor report`: Show metrics for a time window (for example `24h`, `7d`), including token/cost usage by agent and budget alert.
-- `monitor ... --json`: includes `usage` and `budget_alert` fields.
-- budget alert semantics: compares per-run budget against window `max_run_cost_usd` and `avg_run_cost_usd` (not raw window total only).
-- `monitor report --md`: Render a markdown progress report from editable template.
-- `monitor report --write [path]`: Write markdown report to file (default path under `.openteam/worklog/reports`).
-- `monitor report --var key=value`: Inject custom placeholder values (repeatable).
-- `monitor report --vars-file <json>`: Load custom placeholder values from JSON file.
-- Edit template: `.openteam/templates/progress-report.md`.
+Report includes:
 
-Template placeholders:
-- built-in: `{{generated_at}}`, `{{project}}`, `{{since}}`, `{{team}}`, `{{total_events}}`, `{{status_summary}}`, `{{type_breakdown}}`, `{{overall_plan}}`, `{{kpi_summary}}`, `{{risk_level}}`, `{{blockers_owner}}`, `{{agent_completed}}`, `{{progress}}`, `{{todo}}`
-- custom: any `{{your_key}}` provided via `--var your_key=value` or `--vars-file`
+- usage by agent/model
+- budget alert
+- token/cost summary
+- markdown output via template
 
-## Command Defaults (Important)
+## Notes
 
-Commands that default to **current registry team**:
-- `up`
-- `status`
-- `validate`
-- `doctor`
-- `run` (`--team` / `--file` optional)
-- `simulate`
-- `evaluate`
-- `context list|add|lint`
-- `create agent|skill|mcp` (when `--attach`)
-- `compare`/`rollback` for team file (with `--file` override)
-- `policy show`
-- `policy enforce`
-- `optimize`
-- `export`
+- `openteam up`/`go` require AI by default; use `--allow-mock` only for explicit offline fallback.
+- Use `openteam provider test --provider <openai|anthropic>` to check connectivity.
+- High-risk bypass must be explicit: `--ignore-high-risk`.
 
-Fallback rule: if no current team is selected and local `team.yaml` exists, OpenTeam uses local `team.yaml`.
-
-Commands that default to local **`team.yaml`** unless you pass file options:
-- `init` output path defaults to `team.yaml`
-- `create agent|skill|mcp` when not attaching (draft generation only)
-- versions directory defaults remain local: `.openteam/versions`
-
-## AI Model Configuration (OpenTeam Management Layer)
-
-OpenTeam itself is model-driven for planner/optimizer/exporter mapping.
-
-Configure in `<OPENTEAM_HOME>/openteam.yaml`:
-
-```yaml
-current_provider: openai
-
-providers:
-  openai:
-    base_url: https://api.openai.com/v1
-    api_key_env: OPENAI_API_KEY
-    models:
-      default: gpt-5-mini
-      planner: gpt-5
-      optimizer: gpt-5-mini
-      exporter_mapper: gpt-5-mini
-  anthropic:
-    base_url: https://api.anthropic.com
-    api_key_env: ANTHROPIC_API_KEY
-    models:
-      default: claude-sonnet-4
-      planner: claude-sonnet-4
-      optimizer: claude-sonnet-4
-      exporter_mapper: claude-sonnet-4
-```
-
-Model resolution priority:
-1. CLI override (`--optimizer-model`, `--mapper-model`)
-2. `<OPENTEAM_HOME>/openteam.yaml` `current_provider` + `providers.<provider>.models.<role>`
-3. `providers.<provider>.models.default`
-4. Built-in defaults
-
-Provider auth/base URL priority:
-1. Env via `providers.<provider>.api_key_env`
-2. Default env names (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`)
-3. `<OPENTEAM_HOME>/openteam.yaml` `providers.<provider>.base_url` (or provider-specific base_url env)
-
-Security note:
-- `providers.<provider>.api_key` (inline secret) is blocked by design. Use environment variables only.
-
-Schema strictness phases:
-- Default: `OPENTEAM_SCHEMA_STRICT=warn` (emit warnings only).
-- Enforce: `OPENTEAM_SCHEMA_STRICT=fail` (warnings become errors).
-
-### Live Execution
-
-Set provider keys (PowerShell):
-
-```bash
-$env:OPENAI_API_KEY = "..."
-$env:ANTHROPIC_API_KEY = "..."
-```
-
-Then:
-
-```bash
-openteam run --task "Summarize support trends" --execution-mode live
-```
-
-Check provider runtime and connectivity:
-
-```bash
-openteam provider list
-openteam provider test
-openteam provider test --provider openai --timeout-ms 12000
-```
-
-Switch active provider in config:
-
-```yaml
-current_provider: anthropic
-```
-
-`up` auto-selects planner execution mode:
-- with keys: `live`
-- without keys: `mock` fallback
-
-## CLI Themes
-
-Supported themes:
-- `nord`
-- `dracula`
-- `gruvbox`
-- `solarized-dark`
-
-Usage:
-
-```bash
-openteam theme list
-openteam theme set --name dracula
-openteam --theme gruvbox status
-openteam --no-color status
-```
-
-## Context / Marketplace / Resource Creation
-
-```bash
-openteam context list
-openteam context add --path docs/team/culture.md
-openteam context lint
-
-openteam marketplace list
-openteam marketplace add --id community --kind github --url https://github.com/topics/openteam-skill
-openteam marketplace sync
-
-openteam create agent --from-role "QA Reviewer" --attach
-openteam create skill --from-goal "Support ticket classifier" --risk-level low --trust-score 0.5 --attach --auto-comply
-openteam create mcp --from-api "https://api.example.com/openapi.json" --attach
-```
-
-## Command Cheatsheet
-
-- `go`: Default beginner entrypoint; one-command orchestrator (`up -> export -> handoff -> start`).
-- `go --resume`: Resume last failed/incomplete go flow from checkpoint.
-- `up`: Guided setup only (no automatic export); intended for advanced/custom flows.
-- `team`: Registry operations (create/select/show teams).
-- `status`: Show current team operational summary.
-- `validate`: Validate team config schema.
-- `doctor`: Check environment/provider/config readiness.
-- `run`: Execute one task (`mock` or `live`).
-- `simulate`: Run offline batch simulation from dataset.
-- `evaluate`: Generate evaluation report for a run.
-- `optimize`: Propose/apply improvements from run results.
-- `export`: Export to `opencode/openclaw/claude/codex/aider/continue/cline/openhands/tabby` and initialize project worklog.
-- `handoff`: Generate a team handoff package in project `.openteam/handoff`.
-- `start`: Launch target tool with handoff context; optional `--run` for one-shot start.
-- `launcher`: Check local launcher command availability for one or all targets.
-- `monitor`: Read project `.openteam/worklog` progress and metrics.
-- `provider`: Inspect and test provider auth/connectivity.
-- `policy`: Inspect/enforce policy gates (`risk`, `trust`, `approval`).
-- `create`: Generate `agent/skill/mcp` drafts and optionally attach to team.
-- `context`: Manage team context docs (`culture`, `rules`, etc.).
-- `compare`: Diff two team versions.
-- `rollback`: Roll back to a previous team version.
-- `marketplace`: Manage skill/mcp source registries.
-- `theme`: Configure CLI theme.
-- `init`: Initialize local file-mode setup (advanced).
-
-## Architecture (Current)
-
-Two planes:
-
-1. Control plane
-- planner
-- optimizer
-- exporter mapper
-
-2. Execution plane
-- execution agents with model/skill/mcp bindings
-- policy and observability defined in `team.yaml`
-
-Core loop:
-1. Define goal
-2. Build team
-3. Run / simulate
-4. Evaluate
-5. Optimize
-6. Export
-
-## Config Files
-
-- `<OPENTEAM_HOME>/openteam.yaml`: global settings (ui, marketplaces, providers, current_provider)
-- `team.yaml`: team definition (if using local-file mode)
-- Registry team file: `<OPENTEAM_HOME>/teams/<slug>/team.yaml`
-- Built-in data catalogs:
-  - `src/data/topology-templates.json`
-  - `src/data/marketplace-catalog.json`
-
-## Development
-
-```bash
-npm run build
-npm run start
-```
-
-Direct run without global link:
-
-```bash
-node dist/index.js --help
-```

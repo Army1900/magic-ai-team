@@ -5,6 +5,8 @@ import { evaluatePolicies } from "../core/policy";
 import { banner, error, info, kv, status, success } from "../core/ui";
 import { resolveTeamFileOrThrow } from "../core/current-team";
 import { appendWorklogEvent } from "../core/worklog";
+import { recordRunResourceFeedback } from "../core/resource-feedback";
+import { evaluateAgentQuality } from "../core/agent-quality";
 
 export function registerRunCommand(program: Command): void {
   program
@@ -61,7 +63,9 @@ export function registerRunCommand(program: Command): void {
 
         const mode = options.executionMode === "live" ? "live" : "mock";
         const artifact = await executeTaskWithModels(team, options.task, mode);
+        const quality = evaluateAgentQuality(team, artifact);
         const outPath = saveRunArtifact(artifact, team.observability.store.runs_dir);
+        recordRunResourceFeedback(team, artifact);
         appendWorklogEvent(projectPath, {
           type: "run",
           team: team.team.name,
@@ -75,7 +79,14 @@ export function registerRunCommand(program: Command): void {
           meta: {
             run_id: artifact.run_id,
             execution_mode: mode,
-            team_file: teamFile
+            team_file: teamFile,
+            budget_usd: artifact.budget_monitor?.budget_usd,
+            budget_warn_threshold_usd: artifact.budget_monitor?.warn_threshold_usd,
+            budget_downgrade_actions: artifact.budget_monitor?.downgrade_actions,
+            budget_alert_count: artifact.budget_monitor?.alerts.length ?? 0,
+            quality_ok: quality.ok,
+            quality_failed_agents: quality.summary.failed_agents,
+            quality_warned_agents: quality.summary.warned_agents
           }
         });
         for (const step of artifact.steps) {
@@ -92,6 +103,8 @@ export function registerRunCommand(program: Command): void {
             meta: {
               run_id: artifact.run_id,
               model: step.model,
+              budget_action: step.budget_action ?? "none",
+              quality_findings: quality.findings.filter((f) => f.agent_id === step.agent_id).map((f) => f.code),
               execution_mode: mode,
               team_file: teamFile
             }
@@ -105,6 +118,7 @@ export function registerRunCommand(program: Command): void {
                 team_file: teamFile,
                 execution_mode: mode,
                 artifact,
+                quality,
                 saved: outPath
               },
               null,
@@ -123,13 +137,30 @@ export function registerRunCommand(program: Command): void {
         kv("execution_mode", mode);
         kv("latency_ms", artifact.totals.latency_ms);
         kv("cost_usd", artifact.totals.estimated_cost_usd.toFixed(4));
+        kv("tokens", artifact.totals.estimated_tokens);
+        if (artifact.budget_monitor) {
+          kv("budget_usd", artifact.budget_monitor.budget_usd.toFixed(4));
+          kv("budget_warn_threshold_usd", artifact.budget_monitor.warn_threshold_usd.toFixed(4));
+          kv("budget_downgrade_actions", artifact.budget_monitor.downgrade_actions);
+          if (artifact.budget_monitor.alerts.length > 0) {
+            for (const line of artifact.budget_monitor.alerts.slice(0, 3)) {
+              status("warn", "budget_alert", line);
+            }
+          }
+        }
         if (artifact.failure_reason) {
           status("warn", "failure_reason", artifact.failure_reason);
         } else {
           success("Run completed successfully.");
         }
+        kv("quality_ok", quality.ok);
+        kv("quality_failed_agents", quality.summary.failed_agents);
+        kv("quality_warned_agents", quality.summary.warned_agents);
+        for (const finding of quality.findings.slice(0, 6)) {
+          status(finding.severity, `${finding.code}:${finding.agent_id}`, finding.message);
+        }
         kv("saved", outPath);
-        if (!artifact.success) {
+        if (!artifact.success || !quality.ok) {
           process.exitCode = 1;
         }
       } catch (e) {

@@ -39,6 +39,13 @@ interface DiscoveryAnswers {
   humanLoop: HumanLoop;
 }
 
+interface CapabilityDomain {
+  id: string;
+  name: string;
+  objective: string;
+  keywords: string[];
+}
+
 type Choice<T extends string> = { key: string; label: string; value: T };
 export interface UpCommandOptions {
   name?: string;
@@ -184,7 +191,8 @@ function renderAgentDoc(agent: ReturnType<typeof loadTeamConfig>["execution_plan
 function writeTopologyDocs(
   teamDir: string,
   team: ReturnType<typeof loadTeamConfig>,
-  topology: TopologyDesign
+  topology: TopologyDesign,
+  capabilityDomains: CapabilityDomain[]
 ): string[] {
   const docsDir = path.join(teamDir, "docs", "agents");
   fs.mkdirSync(docsDir, { recursive: true });
@@ -202,6 +210,12 @@ function writeTopologyDocs(
     `- lead_id: ${topology.lead_id}\n` +
     `- source: ${topology.source}\n` +
     `- rationale: ${topology.rationale}\n\n` +
+    `## Capability Domains\n` +
+    `${capabilityDomains.length === 0
+      ? "- none\n"
+      : capabilityDomains
+          .map((d, i) => `${i + 1}. ${d.name} (${d.id}) | objective: ${d.objective} | keywords: ${d.keywords.join(", ") || "none"}`)
+          .join("\n") + "\n"}\n` +
     `## Handoffs\n` +
     `${topology.links.length === 0 ? "- none\n" : topology.links.map((l, i) => `${i + 1}. ${l.from} -> ${l.to} | trigger: ${l.trigger} | output: ${l.output}`).join("\n") + "\n"}`;
   fs.writeFileSync(graphPath, graphBody, "utf8");
@@ -244,26 +258,128 @@ function parseJsonFromText<T>(text: string, fallback: T): T {
   }
 }
 
+function looksMostlyEnglish(text: string): boolean {
+  const letters = (text.match(/[A-Za-z]/g) ?? []).length;
+  const cjk = (text.match(/[\u3400-\u9FFF]/g) ?? []).length;
+  return letters >= 12 && letters > cjk * 2;
+}
+
+function slugifyDomainId(input: string): string {
+  const normalized = (input || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return normalized || "domain";
+}
+
+function fallbackCapabilityDomains(discovery: DiscoveryAnswers): CapabilityDomain[] {
+  const keywords = uniqueStrings(
+    `${discovery.problem} ${discovery.outcome} ${discovery.constraints}`
+      .toLowerCase()
+      .split(/[^a-z0-9\u4e00-\u9fff]+/g)
+      .filter((x) => x.length >= 2)
+      .slice(0, 24)
+  );
+  return [
+    {
+      id: "intake_planning",
+      name: "Intake & Planning",
+      objective: "Clarify scope, intent, constraints, and success metrics.",
+      keywords: keywords.slice(0, 8)
+    },
+    {
+      id: "execution_delivery",
+      name: "Execution & Delivery",
+      objective: "Execute core tasks and produce deliverables against contracts.",
+      keywords: keywords.slice(8, 16)
+    },
+    {
+      id: "quality_governance",
+      name: "Quality & Governance",
+      objective: "Review quality, policy constraints, and risk before completion.",
+      keywords: keywords.slice(16, 24)
+    }
+  ];
+}
+
+function parseCapabilityDomains(text: string, fallback: CapabilityDomain[]): CapabilityDomain[] {
+  const raw = parseJsonFromText<{ domains?: Array<Partial<CapabilityDomain>> }>(text, {});
+  const domainsRaw = Array.isArray(raw.domains) ? raw.domains : [];
+  const domains = domainsRaw
+    .map((d) => {
+      const id = slugifyDomainId(String(d.id ?? d.name ?? ""));
+      if (!id) return null;
+      return {
+        id,
+        name: String(d.name ?? id),
+        objective: String(d.objective ?? "Define responsibilities and output contracts."),
+        keywords: uniqueStrings(Array.isArray(d.keywords) ? d.keywords.map((k) => String(k).trim()) : []).slice(0, 12)
+      };
+    })
+    .filter((x): x is CapabilityDomain => Boolean(x));
+  if (domains.length === 0) return fallback;
+  return domains.slice(0, 6);
+}
+
+async function deriveCapabilityDomains(options: {
+  discovery: DiscoveryAnswers;
+  plannerModel: string;
+  plannerExecMode: "live" | "mock";
+  locale: InteractionLocale;
+  out: UpOutput;
+}): Promise<CapabilityDomain[]> {
+  const { discovery, plannerModel, plannerExecMode, locale, out } = options;
+  const fallback = fallbackCapabilityDomains(discovery);
+  if (plannerExecMode !== "live") {
+    return fallback;
+  }
+  try {
+    out.info(say(locale, "AI is deriving capability domains ...", "AI 正在推导能力域，请稍候 ..."));
+    const response = await invokeModel(
+      {
+        model: plannerModel,
+        prompt:
+          `Derive 3-6 capability domains for this team setup.\n` +
+          `Each domain should be responsibility-oriented and actionable for agent design.\n` +
+          `Return JSON only: {"domains":[{"id":"...","name":"...","objective":"...","keywords":["..."]}]}\n\n` +
+          `Discovery:\n${JSON.stringify(discovery, null, 2)}`
+      },
+      "live"
+    );
+    return parseCapabilityDomains(response.text, fallback);
+  } catch (e) {
+    out.vstatus("warn", "capability_domain_fallback", e instanceof Error ? e.message : String(e));
+    return fallback;
+  }
+}
+
 async function runAiDiscoveryInterview(options: {
   plannerModel: string;
   initialPrompt: string;
   aiTurns: number;
   defaults: DiscoveryAnswers;
+  locale: InteractionLocale;
   silent: boolean;
 }): Promise<DiscoveryAnswers> {
-  const { plannerModel, initialPrompt, aiTurns, defaults, silent } = options;
+  const { plannerModel, initialPrompt, aiTurns, defaults, locale, silent } = options;
+  const waitMsg = locale === "zh" ? "AI 正在分析你的输入，请稍候..." : "AI is analyzing your input, please wait...";
+  const langRule =
+    locale === "zh"
+      ? "Use Simplified Chinese for user-facing questions and guidance; keep tool/framework/model names in English."
+      : "Use English for user-facing questions and guidance.";
   const transcript: Array<{ role: "user" | "assistant"; text: string }> = [
     { role: "user", text: initialPrompt }
   ];
   let draft = defaults;
 
   for (let i = 0; i < aiTurns; i += 1) {
+    if (!silent) info(waitMsg);
     const step = await invokeModel(
       {
         model: plannerModel,
         prompt:
           `You are onboarding a user into a team-configuration workflow.\n` +
-          `Infer user language from transcript and continue in that language.\n` +
+          `${langRule}\n` +
           `Follow policy: clarify goal -> outcome -> target -> constraints -> human-loop.\n` +
           `Return JSON only: {"done":boolean,"question":string,"draft":{"teamName":string,"problem":string,"outcome":string,"target":string,"priority":string,"constraints":string,"humanLoop":string}}\n\n` +
           `Current draft:\n${JSON.stringify(draft, null, 2)}\n\n` +
@@ -277,23 +393,49 @@ async function runAiDiscoveryInterview(options: {
 
     const question = (parsed.question ?? "").trim();
     if (!question) break;
-    if (!silent) info(question);
+    let displayQuestion = question;
+    if (locale === "zh" && looksMostlyEnglish(question)) {
+      // Guardrail: at most one translation rewrite attempt per question.
+      try {
+        if (!silent) info("AI 正在将问题重述为中文...");
+        const rewritten = await invokeModel(
+          {
+            model: plannerModel,
+            prompt:
+              `Rewrite the following user-facing question into concise Simplified Chinese.\n` +
+              `Keep tool/framework/model names in English.\n` +
+              `Return plain text only.\n\n` +
+              `Question:\n${question}`
+          },
+          "live"
+        );
+        const candidate = (rewritten.text ?? "").trim();
+        if (candidate) {
+          displayQuestion = candidate;
+        }
+      } catch {
+        // Keep original question when rewrite fails.
+      }
+    }
+    if (!silent) info(displayQuestion);
 
     const rl = readline.createInterface({ input, output });
     const answer = (await rl.question(">> ")).trim();
     rl.close();
     if (!answer) continue;
 
-    transcript.push({ role: "assistant", text: question });
+    transcript.push({ role: "assistant", text: displayQuestion });
     transcript.push({ role: "user", text: answer });
   }
 
+  if (!silent) info(waitMsg);
   const final = await invokeModel(
     {
       model: plannerModel,
       prompt:
         `Finalize discovery into strict JSON with keys: teamName, problem, outcome, target, priority, constraints, humanLoop.\n` +
-        `Infer user language from transcript but return keys in English.\n\n` +
+        `${langRule}\n` +
+        `Return keys in English.\n\n` +
         `Draft:\n${JSON.stringify(draft, null, 2)}\n\n` +
         `Transcript:\n${transcript.map((t) => `${t.role}: ${t.text}`).join("\n")}`
     },
@@ -334,22 +476,31 @@ async function collectDiscovery(options: {
   }
 
   if (options.plannerExecMode === "live") {
+    const promptText = say(
+      options.locale ?? "en",
+      "Describe your project/team need in one sentence: ",
+      "请用一句话描述你的项目/团队需求："
+    );
     const rl = readline.createInterface({ input, output });
-    const initial = (await rl.question("Describe your project/team need in one sentence: ")).trim();
+    const initial = (await rl.question(promptText)).trim();
     rl.close();
+    const seededText = initial || defaultProblem;
+    const seededName = options.name ?? seededText ?? defaultName;
+    const preferredLocale = resolveInteractionLocale(seededText);
     return runAiDiscoveryInterview({
       plannerModel: options.plannerModel,
-      initialPrompt: initial || defaultProblem,
+      initialPrompt: seededText,
       aiTurns: Math.max(1, options.aiTurns),
       defaults: {
-        teamName: defaultName,
-        problem: defaultProblem,
+        teamName: seededName,
+        problem: seededText,
         outcome: defaultOutcome,
         target: defaultTarget,
         priority: defaultPriority,
         constraints: defaultConstraints,
         humanLoop: defaultHuman
       },
+      locale: preferredLocale,
       silent: options.silent
     });
   }
@@ -519,6 +670,10 @@ interface UpOutput {
   vstatus: (kind: "ok" | "warn" | "fail", label: string, detail: string) => void;
 }
 
+function stageLine(locale: InteractionLocale, current: number, total: number, enLabel: string, zhLabel: string): string {
+  return `[${current}/${total}] ${say(locale, enLabel, zhLabel)}`;
+}
+
 function createUpOutput(silent: boolean, verbose: boolean): UpOutput {
   return {
     banner: (title, subtitle) => {
@@ -627,36 +782,19 @@ async function applyResourceAndTopology(options: {
   silent: boolean;
   out: UpOutput;
 }): Promise<void> {
-  // Keep marketplace recommendation and topology composition in one stage to avoid partial state writes.
   const { entryDir, team, discovery, locale, plannerModel, plannerExecMode, nonInteractive, silent, out } = options;
-  try {
-    const openTeamConfig = loadOrCreateOpenTeamConfig();
-    const candidates = recommendMarketplaceCandidates(
-      {
-        teamName: discovery.teamName,
-        problem: discovery.problem,
-        outcome: discovery.outcome,
-        constraints: discovery.constraints
-      },
-      team,
-      openTeamConfig,
-      { skills: 3, mcps: 3 }
-    );
-    if (candidates.length > 0 && !nonInteractive && !silent) {
-      const selected = await promptMarketplaceSelection(locale, candidates);
-      if (selected.length > 0) {
-        const attached = attachRecommendedResources(team, selected);
-        out.status("ok", "marketplace_attach", `skills=${attached.skillsAdded.length}, mcps=${attached.mcpsAdded.length}`);
-        if (attached.skillsAdded.length > 0) out.vkv("skills_added", attached.skillsAdded.join(", "));
-        if (attached.mcpsAdded.length > 0) out.vkv("mcps_added", attached.mcpsAdded.join(", "));
-      } else {
-        out.vstatus("warn", "marketplace_attach", "no recommended resources selected");
-      }
-    }
-  } catch (e) {
-    out.vstatus("warn", "marketplace_recommend", e instanceof Error ? e.message : String(e));
-  }
+  out.info(stageLine(locale, 1, 3, "Capability domain analysis", "能力域分析"));
+  const capabilityDomains = await deriveCapabilityDomains({
+    discovery,
+    plannerModel,
+    plannerExecMode,
+    locale,
+    out
+  });
+  out.status("ok", "capability_domains", `count=${capabilityDomains.length}`);
+  out.vkv("domain_ids", capabilityDomains.map((d) => d.id).join(", "));
 
+  out.info(stageLine(locale, 2, 3, "Agent topology design", "Agent 拓扑设计"));
   let topology = buildRuleBasedTopology(
     {
       problem: discovery.problem,
@@ -667,14 +805,17 @@ async function applyResourceAndTopology(options: {
   );
   try {
     if (plannerExecMode === "live") {
+      out.info(say(locale, "AI is designing the team topology ...", "AI 正在设计团队拓扑，请稍候 ..."));
       const topologyPrompt =
         `Design an execution-agent team topology for this project.\n` +
         `Must include a lead agent that coordinates the team.\n` +
         `Prefer 3-6 agents, each with clear contracts.\n` +
+        `First align agents to capability domains, then map responsibilities.\n` +
         `Return JSON only with keys: lead_id, rationale, agents, links.\n` +
         `agents[] keys: id, role, risk_level, model{primary,fallback}, skills[], mcps[], input_contract, output_contract.\n` +
         `links[] keys: from, to, trigger, output.\n\n` +
         `Discovery:\n${JSON.stringify(discovery, null, 2)}\n\n` +
+        `Capability domains:\n${JSON.stringify(capabilityDomains, null, 2)}\n\n` +
         `Available skills:\n${team.resources.skills.map((s) => s.id).join(", ")}\n` +
         `Available mcps:\n${team.resources.mcps.map((m) => m.id).join(", ")}`;
       const aiTopology = await invokeModel(
@@ -691,6 +832,39 @@ async function applyResourceAndTopology(options: {
   }
 
   team.execution_plane.agents = topology.agents;
+
+  out.info(stageLine(locale, 3, 3, "Skill/MCP recommendation and binding", "Skill/MCP 推荐与绑定"));
+  try {
+    const openTeamConfig = loadOrCreateOpenTeamConfig();
+    const domainText = capabilityDomains.flatMap((d) => [d.name, d.objective, ...d.keywords]).join(" ");
+    const candidates = recommendMarketplaceCandidates(
+      {
+        teamName: discovery.teamName,
+        problem: `${discovery.problem} ${domainText}`,
+        outcome: discovery.outcome,
+        constraints: discovery.constraints
+      },
+      team,
+      openTeamConfig,
+      { skills: 3, mcps: 3 }
+    );
+    if (candidates.length > 0 && !nonInteractive && !silent) {
+      const selected = await promptMarketplaceSelection(locale, candidates);
+      if (selected.length > 0) {
+        const attached = attachRecommendedResources(team, selected, {
+          domainKeywords: capabilityDomains.flatMap((d) => [d.id, d.name, ...d.keywords])
+        });
+        out.status("ok", "marketplace_attach", `skills=${attached.skillsAdded.length}, mcps=${attached.mcpsAdded.length}`);
+        if (attached.skillsAdded.length > 0) out.vkv("skills_added", attached.skillsAdded.join(", "));
+        if (attached.mcpsAdded.length > 0) out.vkv("mcps_added", attached.mcpsAdded.join(", "));
+      } else {
+        out.vstatus("warn", "marketplace_attach", "no recommended resources selected");
+      }
+    }
+  } catch (e) {
+    out.vstatus("warn", "marketplace_recommend", e instanceof Error ? e.message : String(e));
+  }
+
   const allSkillIds = new Set(team.resources.skills.map((s) => s.id));
   const allMcpIds = new Set(team.resources.mcps.map((m) => m.id));
   for (const agent of team.execution_plane.agents) {
@@ -710,7 +884,7 @@ async function applyResourceAndTopology(options: {
     leadAgent.skills = uniqueStrings(leadAgent.skills);
     leadAgent.mcps = uniqueStrings(leadAgent.mcps);
   }
-  const topologyDocs = writeTopologyDocs(entryDir, team, topology);
+  const topologyDocs = writeTopologyDocs(entryDir, team, topology, capabilityDomains);
   team.context_docs = uniqueStrings([...(team.context_docs ?? []), ...topologyDocs]);
   out.status("ok", "agent_topology", `agents=${team.execution_plane.agents.length}, lead=${topology.lead_id}, source=${topology.source}`);
   out.vkv("agent_ids", team.execution_plane.agents.map((a) => a.id).join(", "));
@@ -787,6 +961,7 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
       `Priority: ${discovery.priority}\n` +
       `Human loop: ${discovery.humanLoop}\n`;
     try {
+      out.info(say(locale, "AI is generating planning notes ...", "AI 正在生成规划说明，请稍候 ..."));
       const aiPlan = await invokeModel(
         {
           model: plannerModel,

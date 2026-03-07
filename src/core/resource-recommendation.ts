@@ -1,5 +1,6 @@
 import { OpenTeamConfig, SkillResource, McpResource, TeamConfig } from "./types";
 import marketplaceCatalogJson from "../data/marketplace-catalog.json";
+import { feedbackScoreDelta, recordResourceAttachment } from "./resource-feedback";
 
 type ResourceType = "skill" | "mcp";
 
@@ -22,6 +23,10 @@ export interface RecommendInput {
   problem: string;
   outcome: string;
   constraints: string;
+}
+
+export interface ResourceAttachOptions {
+  domainKeywords?: string[];
 }
 
 export const MARKETPLACE_CATALOG_BUILTIN: MarketplaceCandidate[] = [
@@ -607,15 +612,29 @@ function aboveTrust(config: OpenTeamConfig, candidate: MarketplaceCandidate): bo
 
 function scoreCandidate(candidate: MarketplaceCandidate, queryTokens: string[]): number {
   let score = 0;
+  let matched = false;
   const id = normalizeText(candidate.id);
   const title = normalizeText(candidate.title);
   for (const token of queryTokens) {
-    if (candidate.tags.includes(token)) score += 4;
-    if (id.includes(token)) score += 2;
-    if (title.includes(token)) score += 1;
+    if (candidate.tags.includes(token)) {
+      score += 4;
+      matched = true;
+    }
+    if (id.includes(token)) {
+      score += 2;
+      matched = true;
+    }
+    if (title.includes(token)) {
+      score += 1;
+      matched = true;
+    }
+  }
+  if (!matched) {
+    return 0;
   }
   if ((candidate.risk_level ?? "low") === "low") score += 1;
   if (candidate.type === "skill" && (candidate.trust_score ?? 0) >= 0.9) score += 1;
+  score += feedbackScoreDelta(candidate.type, candidate.id);
   return score;
 }
 
@@ -625,6 +644,17 @@ function uniqueById<T extends { id: string }>(items: T[]): T[] {
   for (const item of items) {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
+    out.push(item);
+  }
+  return out;
+}
+
+function uniqueStrings(items: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of items) {
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
     out.push(item);
   }
   return out;
@@ -660,7 +690,61 @@ export function recommendMarketplaceCandidates(
   return [...skills, ...mcps];
 }
 
-export function attachRecommendedResources(team: TeamConfig, selected: MarketplaceCandidate[]): {
+function scoreAgentFit(
+  agent: TeamConfig["execution_plane"]["agents"][number],
+  candidate: MarketplaceCandidate,
+  domainKeywords: string[]
+): number {
+  const text = normalizeText(
+    `${agent.id} ${agent.role} ${agent.input_contract} ${agent.output_contract} ${agent.skills.join(" ")} ${agent.mcps.join(" ")}`
+  );
+  const candidateTokens = uniqueStrings([
+    ...tokenize(candidate.id),
+    ...tokenize(candidate.title),
+    ...candidate.tags.map((t) => normalizeText(t)),
+    ...domainKeywords
+  ]);
+  let score = 0;
+  for (const token of candidateTokens) {
+    if (token.length < 2) continue;
+    if (text.includes(token)) score += 2;
+  }
+  if (candidate.type === "mcp" && (agent.id.includes("executor") || text.includes("integrat") || text.includes("tool"))) {
+    score += 2;
+  }
+  if (candidate.type === "skill" && (text.includes("analysis") || text.includes("triage") || text.includes("review"))) {
+    score += 1;
+  }
+  return score;
+}
+
+function pickBestAgent(
+  team: TeamConfig,
+  candidate: MarketplaceCandidate,
+  domainKeywords: string[]
+): TeamConfig["execution_plane"]["agents"][number] | null {
+  if (team.execution_plane.agents.length === 0) return null;
+  const leadLike = team.execution_plane.agents.find((a) => a.id.includes("lead") || normalizeText(a.role).includes("lead"));
+  let best = team.execution_plane.agents[0];
+  let bestScore = -1;
+  for (const agent of team.execution_plane.agents) {
+    const score = scoreAgentFit(agent, candidate, domainKeywords);
+    if (score > bestScore) {
+      best = agent;
+      bestScore = score;
+    }
+  }
+  if (bestScore <= 0) {
+    return leadLike ?? team.execution_plane.agents[0];
+  }
+  return best;
+}
+
+export function attachRecommendedResources(
+  team: TeamConfig,
+  selected: MarketplaceCandidate[],
+  options: ResourceAttachOptions = {}
+): {
   skillsAdded: string[];
   mcpsAdded: string[];
 } {
@@ -668,6 +752,7 @@ export function attachRecommendedResources(team: TeamConfig, selected: Marketpla
   const mcpsAdded: string[] = [];
   const skillSet = new Set(team.resources.skills.map((s) => s.id));
   const mcpSet = new Set(team.resources.mcps.map((m) => m.id));
+  const domainKeywords = uniqueStrings((options.domainKeywords ?? []).map((x) => normalizeText(x)));
 
   for (const item of selected) {
     if (item.type === "skill") {
@@ -682,8 +767,9 @@ export function attachRecommendedResources(team: TeamConfig, selected: Marketpla
       });
       skillSet.add(item.id);
       skillsAdded.push(item.id);
-      if (team.execution_plane.agents[0] && !team.execution_plane.agents[0].skills.includes(item.id)) {
-        team.execution_plane.agents[0].skills.push(item.id);
+      const targetAgent = pickBestAgent(team, item, domainKeywords);
+      if (targetAgent && !targetAgent.skills.includes(item.id)) {
+        targetAgent.skills.push(item.id);
       }
       continue;
     }
@@ -698,11 +784,16 @@ export function attachRecommendedResources(team: TeamConfig, selected: Marketpla
     });
     mcpSet.add(item.id);
     mcpsAdded.push(item.id);
-    const executor = team.execution_plane.agents.find((a) => a.id === "executor") ?? team.execution_plane.agents[0];
-    if (executor && !executor.mcps.includes(item.id)) {
-      executor.mcps.push(item.id);
+    const targetAgent = pickBestAgent(team, item, domainKeywords);
+    if (targetAgent && !targetAgent.mcps.includes(item.id)) {
+      targetAgent.mcps.push(item.id);
     }
   }
+
+  recordResourceAttachment([
+    ...skillsAdded.map((id) => ({ type: "skill" as const, id })),
+    ...mcpsAdded.map((id) => ({ type: "mcp" as const, id }))
+  ]);
 
   return { skillsAdded, mcpsAdded };
 }

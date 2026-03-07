@@ -207,6 +207,7 @@ export interface OpenTeamConfig {
 export interface AgentRunStep {
   agent_id: string;
   model: string;
+  budget_action?: "none" | "downgraded";
   status: "ok" | "fail";
   latency_ms: number;
   estimated_tokens: number;
@@ -225,6 +226,12 @@ export interface RunArtifact {
     latency_ms: number;
     estimated_tokens: number;
     estimated_cost_usd: number;
+  };
+  budget_monitor?: {
+    budget_usd: number;
+    warn_threshold_usd: number;
+    alerts: string[];
+    downgrade_actions: number;
   };
   steps: AgentRunStep[];
   failure_reason?: string;
