@@ -3,7 +3,8 @@ import { defaultTeamTemplate } from "../core/templates";
 import { OpenTeamConfig, TeamConfig } from "../core/types";
 import {
   attachRecommendedResources,
-  recommendMarketplaceCandidates
+  recommendMarketplaceCandidates,
+  recommendMarketplaceCandidatesDetailed
 } from "../core/resource-recommendation";
 
 function run(name: string, fn: () => void): void {
@@ -132,4 +133,45 @@ run("attachRecommendedResources binds resources to best-fit agent by role contex
   assert.equal(attached.mcpsAdded.includes("servicenow-mcp"), true);
   assert.equal(team.execution_plane.agents[0].skills.includes("support_ticket_classifier"), true);
   assert.equal(team.execution_plane.agents[1].mcps.includes("servicenow-mcp"), true);
+});
+
+run("recommendMarketplaceCandidatesDetailed prefers education-domain resources and provides reasons", () => {
+  const team = defaultTeamTemplate("Tutor Team", "Help students improve scores");
+  team.resources.skills = [];
+  team.resources.mcps = [];
+  const detail = recommendMarketplaceCandidatesDetailed(
+    {
+      teamName: "家教团队",
+      problem: "我想弄一个家教团队帮学生提高成绩",
+      outcome: "提升考试成绩",
+      constraints: "预算有限"
+    },
+    team,
+    openTeamConfig,
+    { skills: 3, mcps: 2, allowHighRisk: false }
+  );
+  assert.equal(detail.domain, "education");
+  assert.equal(detail.items.length > 0, true);
+  const educationCore = new Set(["curriculum_planning", "lesson_authoring", "assessment_design", "pedagogy_review"]);
+  assert.equal(detail.items.some((r) => educationCore.has(r.candidate.id)), true);
+  assert.equal(detail.items.every((r) => r.reason.length > 0), true);
+});
+
+run("recommendMarketplaceCandidatesDetailed filters out high-risk by default", () => {
+  const team = defaultTeamTemplate("Risk Team", "Risk workflow");
+  team.resources.skills = [];
+  team.resources.mcps = [];
+  const detail = recommendMarketplaceCandidatesDetailed(
+    {
+      teamName: "Risk Team",
+      problem: "finance risk policy and transaction review",
+      outcome: "reduce fraud",
+      constraints: "no special constraints"
+    },
+    team,
+    openTeamConfig,
+    { skills: 5, mcps: 3, allowHighRisk: false }
+  );
+  assert.equal(detail.blocked_high_risk_count > 0, true);
+  assert.equal(detail.items.some((r) => (r.candidate.risk_level ?? "low") === "high"), false);
 });

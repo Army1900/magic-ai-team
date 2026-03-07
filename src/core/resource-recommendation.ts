@@ -17,6 +17,32 @@ export interface CatalogMcp extends McpResource {
 }
 
 export type MarketplaceCandidate = CatalogSkill | CatalogMcp;
+export type RecommendationDomain =
+  | "support"
+  | "qa_release"
+  | "security"
+  | "supply_chain"
+  | "healthcare"
+  | "finance_risk"
+  | "ecommerce"
+  | "education"
+  | "legal"
+  | "general";
+
+export interface MarketplaceRecommendation {
+  candidate: MarketplaceCandidate;
+  score: number;
+  domain: RecommendationDomain;
+  matched_terms: string[];
+  matched_domain_tags: string[];
+  reason: string;
+}
+
+export interface MarketplaceRecommendationResult {
+  domain: RecommendationDomain;
+  blocked_high_risk_count: number;
+  items: MarketplaceRecommendation[];
+}
 
 export interface RecommendInput {
   teamName: string;
@@ -586,6 +612,36 @@ function normalizeText(input: string): string {
   return (input || "").toLowerCase();
 }
 
+const DOMAIN_HINTS: Record<RecommendationDomain, string[]> = {
+  support: ["support", "ticket", "triage", "客服", "工单", "分流"],
+  qa_release: ["qa", "release", "defect", "testing", "测试", "发布", "缺陷"],
+  security: ["security", "incident", "threat", "soc", "安全", "应急", "威胁"],
+  supply_chain: ["supply", "logistics", "procurement", "供应链", "物流", "采购"],
+  healthcare: ["medical", "health", "pharma", "healthcare", "医疗", "药物"],
+  finance_risk: ["finance", "risk", "fraud", "aml", "kyc", "风控", "金融", "反洗钱"],
+  ecommerce: ["ecommerce", "shop", "catalog", "promotion", "电商", "商品", "促销"],
+  education: ["education", "learning", "curriculum", "lesson", "assessment", "家教", "教学", "课程", "学生", "提分", "考试"],
+  legal: ["legal", "contract", "clause", "compliance", "法务", "合同", "条款", "合规"],
+  general: []
+};
+
+function detectRecommendationDomain(queryTokens: string[]): RecommendationDomain {
+  let best: RecommendationDomain = "general";
+  let score = 0;
+  for (const [domain, hints] of Object.entries(DOMAIN_HINTS) as Array<[RecommendationDomain, string[]]>) {
+    if (domain === "general") continue;
+    let current = 0;
+    for (const token of queryTokens) {
+      if (hints.some((h) => token.includes(h) || h.includes(token))) current += 1;
+    }
+    if (current > score) {
+      score = current;
+      best = domain;
+    }
+  }
+  return score > 0 ? best : "general";
+}
+
 function tokenize(input: string): string[] {
   return normalizeText(input)
     .split(/[^a-z0-9\u4e00-\u9fff]+/g)
@@ -638,6 +694,40 @@ function scoreCandidate(candidate: MarketplaceCandidate, queryTokens: string[]):
   return score;
 }
 
+function matchedQueryTerms(candidate: MarketplaceCandidate, queryTokens: string[]): string[] {
+  const id = normalizeText(candidate.id);
+  const title = normalizeText(candidate.title);
+  const tags = candidate.tags.map((t) => normalizeText(t));
+  const matched: string[] = [];
+  for (const token of queryTokens) {
+    if (tags.some((tag) => tag === token || tag.includes(token) || token.includes(tag)) || id.includes(token) || title.includes(token)) {
+      if (!matched.includes(token)) matched.push(token);
+    }
+  }
+  return matched;
+}
+
+function domainMatchedTags(candidate: MarketplaceCandidate, domain: RecommendationDomain): string[] {
+  if (domain === "general") return [];
+  const hints = DOMAIN_HINTS[domain];
+  return candidate.tags
+    .map((t) => normalizeText(t))
+    .filter((tag) => hints.some((h) => tag.includes(h) || h.includes(tag)));
+}
+
+function buildRecommendationReason(
+  domain: RecommendationDomain,
+  matchedTerms: string[],
+  matchedDomainTags: string[],
+  riskLevel: string
+): string {
+  const domainPart = domain === "general" ? "generic scenario match" : `domain=${domain}`;
+  const terms = matchedTerms.slice(0, 4).join(", ") || "query semantics";
+  const domainTags = matchedDomainTags.slice(0, 3).join(", ");
+  const tagsPart = domainTags ? `, domain tags: ${domainTags}` : "";
+  return `${domainPart}, matched: ${terms}${tagsPart}, risk=${riskLevel}`;
+}
+
 function uniqueById<T extends { id: string }>(items: T[]): T[] {
   const seen = new Set<string>();
   const out: T[] = [];
@@ -666,28 +756,74 @@ export function recommendMarketplaceCandidates(
   config: OpenTeamConfig,
   limits: { skills?: number; mcps?: number } = {}
 ): MarketplaceCandidate[] {
+  return recommendMarketplaceCandidatesDetailed(input, team, config, limits).items.map((x) => x.candidate);
+}
+
+export function recommendMarketplaceCandidatesDetailed(
+  input: RecommendInput,
+  team: TeamConfig,
+  config: OpenTeamConfig,
+  limits: { skills?: number; mcps?: number; allowHighRisk?: boolean } = {}
+): MarketplaceRecommendationResult {
   const query = `${input.teamName} ${input.problem} ${input.outcome} ${input.constraints}`;
   const tokens = tokenize(query);
+  const domain = detectRecommendationDomain(tokens);
   const existingSkillIds = new Set(team.resources.skills.map((s) => s.id));
   const existingMcpIds = new Set(team.resources.mcps.map((m) => m.id));
   const maxSkills = Math.max(0, limits.skills ?? 3);
   const maxMcps = Math.max(0, limits.mcps ?? 3);
+  const allowHighRisk = Boolean(limits.allowHighRisk);
+  let blockedHighRiskCount = 0;
 
   const catalog = loadMarketplaceCatalog();
-  const scored = catalog.filter((c) => sourceEnabled(config, c) && aboveTrust(config, c))
-    .map((c) => ({ c, score: scoreCandidate(c, tokens) }))
-    .filter((x) => x.score > 0)
+  const scored = catalog
+    .filter((c) => sourceEnabled(config, c) && aboveTrust(config, c))
+    .flatMap((c) => {
+      if (!allowHighRisk && (c.risk_level ?? "low") === "high") {
+        blockedHighRiskCount += 1;
+        return [];
+      }
+      const matchedTerms = matchedQueryTerms(c, tokens);
+      if (matchedTerms.length === 0) return [];
+      const matchedDomainTags = domainMatchedTags(c, domain);
+      let score = scoreCandidate(c, tokens);
+      if (domain !== "general") {
+        if (matchedDomainTags.length > 0) score += 6 + Math.min(2, matchedDomainTags.length);
+        else score -= 2;
+      }
+      if (score <= 0) return [];
+      // For domain-specific inputs, discard weak cross-domain resources.
+      if (domain !== "general" && matchedDomainTags.length === 0 && score < 8) return [];
+      const reason = buildRecommendationReason(domain, matchedTerms, matchedDomainTags, c.risk_level ?? "low");
+      return [{ candidate: c, score, matchedTerms, matchedDomainTags, reason }];
+    })
     .sort((a, b) => b.score - a.score)
-    .map((x) => x.c);
+    .map((x) => x);
 
-  const skills = uniqueById(scored.filter((c): c is CatalogSkill => c.type === "skill"))
+  const skills = uniqueById(scored.map((x) => x.candidate).filter((c): c is CatalogSkill => c.type === "skill"))
     .filter((c) => !existingSkillIds.has(c.id))
     .slice(0, maxSkills);
-  const mcps = uniqueById(scored.filter((c): c is CatalogMcp => c.type === "mcp"))
+  const mcps = uniqueById(scored.map((x) => x.candidate).filter((c): c is CatalogMcp => c.type === "mcp"))
     .filter((c) => !existingMcpIds.has(c.id))
     .slice(0, maxMcps);
 
-  return [...skills, ...mcps];
+  const selectedIds = new Set([...skills, ...mcps].map((c) => c.id));
+  const items = scored
+    .filter((x) => selectedIds.has(x.candidate.id))
+    .map((x) => ({
+      candidate: x.candidate,
+      score: x.score,
+      domain,
+      matched_terms: x.matchedTerms,
+      matched_domain_tags: x.matchedDomainTags,
+      reason: x.reason
+    }));
+
+  return {
+    domain,
+    blocked_high_risk_count: blockedHighRiskCount,
+    items
+  };
 }
 
 function scoreAgentFit(

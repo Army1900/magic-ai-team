@@ -2,8 +2,9 @@ import { Command } from "commander";
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
+import * as readlineCore from "node:readline";
 import { stdin as input, stdout as output } from "node:process";
-import { createTeamInRegistry, useRegistryTeam } from "../core/team-registry";
+import { createTeamInRegistry, findRegistryTeam, RegistryEntry, useRegistryTeam } from "../core/team-registry";
 import { loadTeamConfig, resolveHomeOpenTeamConfigPath, writeYamlFile } from "../core/config";
 import { validateTeamConfig } from "../core/validate";
 import { evaluatePolicies } from "../core/policy";
@@ -20,7 +21,8 @@ import { loadOrCreateOpenTeamConfig } from "../core/marketplace";
 import {
   attachRecommendedResources,
   MarketplaceCandidate,
-  recommendMarketplaceCandidates
+  MarketplaceRecommendation,
+  recommendMarketplaceCandidatesDetailed
 } from "../core/resource-recommendation";
 import { consumeResourceFeedbackWarning } from "../core/resource-feedback";
 import { buildRuleBasedTopology, parseAiTopology, TopologyDesign } from "../core/dynamic-topology";
@@ -104,9 +106,153 @@ function choiceLabel(locale: InteractionLocale, en: string, zh: string): string 
   return locale === "zh" ? zh : en;
 }
 
+async function askInputLine(rl: readline.Interface): Promise<string> {
+  return (await rl.question("Input > ")).trim();
+}
+
+async function promptSingleChoiceByKeys<T extends string>(options: {
+  title: string;
+  choices: Choice<T>[];
+  defaultValue: T;
+  locale: InteractionLocale;
+}): Promise<T | null> {
+  const { title, choices, defaultValue, locale } = options;
+  if (!process.stdin.isTTY || !process.stdout.isTTY || choices.length === 0) return null;
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+  let cursor = Math.max(0, choices.findIndex((c) => c.value === defaultValue));
+  let lineCount = 0;
+  let resolved = false;
+  let selected: T = choices[cursor]?.value ?? defaultValue;
+  const hint = say(
+    locale,
+    "Use Up/Down to move, Enter to confirm, Esc to use default.",
+    "使用上下键移动，回车确认，Esc 使用默认值。"
+  );
+  const render = (): void => {
+    const lines: string[] = [];
+    lines.push(title);
+    lines.push(hint);
+    for (let i = 0; i < choices.length; i += 1) {
+      const c = choices[i];
+      const pointer = i === cursor ? ">" : " ";
+      const isDefault = c.value === defaultValue ? " (default)" : "";
+      lines.push(`${pointer} ${c.key}) ${c.label}${isDefault}`);
+    }
+    if (lineCount > 0) stdout.write(`\x1b[${lineCount}F`);
+    const nextCount = Math.max(lineCount, lines.length);
+    for (let i = 0; i < nextCount; i += 1) {
+      stdout.write("\x1b[2K");
+      if (i < lines.length) stdout.write(lines[i]);
+      stdout.write("\n");
+    }
+    lineCount = nextCount;
+  };
+  const cleanup = (): void => {
+    if (stdin.setRawMode) stdin.setRawMode(false);
+    stdin.pause();
+    stdin.off("keypress", onKeypress);
+    stdout.write("\x1b[?25h");
+    if (lineCount > 0) {
+      stdout.write(`\x1b[${lineCount}F`);
+      for (let i = 0; i < lineCount; i += 1) stdout.write("\x1b[2K\n");
+      stdout.write(`\x1b[${lineCount}F`);
+    }
+  };
+  const onKeypress = (_str: string, key: readlineCore.Key): void => {
+    if (resolved) return;
+    if (key.name === "up") {
+      cursor = (cursor - 1 + choices.length) % choices.length;
+      render();
+      return;
+    }
+    if (key.name === "down") {
+      cursor = (cursor + 1) % choices.length;
+      render();
+      return;
+    }
+    if (key.name === "escape") {
+      selected = defaultValue;
+      resolved = true;
+      return;
+    }
+    if ((key.name === "return" || key.name === "enter") && choices[cursor]) {
+      selected = choices[cursor].value;
+      resolved = true;
+      return;
+    }
+    if (key.ctrl && key.name === "c") {
+      selected = defaultValue;
+      resolved = true;
+    }
+  };
+  readlineCore.emitKeypressEvents(stdin);
+  if (stdin.setRawMode) stdin.setRawMode(true);
+  stdin.resume();
+  stdout.write("\x1b[?25l");
+  stdin.on("keypress", onKeypress);
+  render();
+  await new Promise<void>((resolve) => {
+    const timer = setInterval(() => {
+      if (resolved) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 16);
+  });
+  cleanup();
+  return selected;
+}
+
+async function withSpinner<T>(
+  enabled: boolean,
+  message: string,
+  task: () => Promise<T>
+): Promise<T> {
+  if (!enabled) return task();
+  const frames = ["-", "\\", "|", "/"];
+  let frameIndex = 0;
+  let stopped = false;
+  let tick = 0;
+  let lastLineLength = 0;
+  const render = (): void => {
+    if (stopped) return;
+    tick += 1;
+    const elapsed = ((tick * 120) / 1000).toFixed(1);
+    const frame = frames[frameIndex % frames.length];
+    frameIndex += 1;
+    const line = `${frame} ${message} (${elapsed}s)`;
+    const padded = line.length < lastLineLength ? line + " ".repeat(lastLineLength - line.length) : line;
+    process.stdout.write(`\r${padded}`);
+    lastLineLength = line.length;
+  };
+  render();
+  const timer = setInterval(render, 120);
+  try {
+    const result = await task();
+    return result;
+  } finally {
+    stopped = true;
+    clearInterval(timer);
+    process.stdout.write(`\r${" ".repeat(Math.max(lastLineLength, 1))}\r`);
+  }
+}
+
 async function confirmContinueMock(message: string): Promise<boolean> {
+  const locale: InteractionLocale = hasCjkText(message) ? "zh" : "en";
+  const keyboard = await promptSingleChoiceByKeys({
+    title: message,
+    locale,
+    choices: [
+      { key: "1", label: say(locale, "Yes", "是"), value: "yes" },
+      { key: "2", label: say(locale, "No", "否"), value: "no" }
+    ],
+    defaultValue: "no"
+  });
+  if (keyboard) return keyboard === "yes";
   const rl = readline.createInterface({ input, output });
-  const answer = (await rl.question(`${message} [y/N]: `)).trim().toLowerCase();
+  info(message);
+  const answer = (await askInputLine(rl)).toLowerCase();
   rl.close();
   return answer === "y" || answer === "yes";
 }
@@ -114,6 +260,7 @@ async function confirmContinueMock(message: string): Promise<boolean> {
 function parseSelectionInput(inputRaw: string, max: number): number[] {
   const input = (inputRaw ?? "").trim().toLowerCase();
   if (!input) return [];
+  if (input === "s" || input === "skip") return [];
   if (input === "a" || input === "all") {
     return Array.from({ length: max }, (_, i) => i + 1);
   }
@@ -133,29 +280,177 @@ function parseSelectionInput(inputRaw: string, max: number): number[] {
 
 async function promptMarketplaceSelection(
   locale: InteractionLocale,
-  candidates: MarketplaceCandidate[]
+  recommendations: MarketplaceRecommendation[],
+  metadata: { domain: string; blockedHighRiskCount: number }
 ): Promise<MarketplaceCandidate[]> {
+  const candidates = recommendations.map((r) => r.candidate);
   if (candidates.length === 0) return [];
-  info(say(locale, "Marketplace recommendations based on discovery:", "基于访谈结果的市场推荐资源："));
-  for (let i = 0; i < candidates.length; i += 1) {
-    const c = candidates[i];
+  info(
+    say(
+      locale,
+      `Marketplace recommendations (domain=${metadata.domain}):`,
+      `市场推荐资源（场景域=${metadata.domain}）：`
+    )
+  );
+  if (metadata.blockedHighRiskCount > 0) {
+    status(
+      "warn",
+      "high_risk_filtered",
+      say(
+        locale,
+        `${metadata.blockedHighRiskCount} high-risk resources are hidden by default.`,
+        `默认已隐藏 ${metadata.blockedHighRiskCount} 个高风险资源。`
+      )
+    );
+  }
+  for (let i = 0; i < recommendations.length; i += 1) {
+    const r = recommendations[i];
+    const c = r.candidate;
     const typeLabel = c.type === "skill" ? "skill" : "mcp";
     const trust = c.type === "skill" ? ` trust=${c.trust_score ?? 0}` : "";
     info(
       `  ${i + 1}) [${typeLabel}] ${c.id} (${c.source}) risk=${c.risk_level ?? "low"}${trust} - ${c.title}`
     );
+    info(`     reason: ${r.reason}`);
+  }
+  const defaultSelection = recommendations
+    .slice(0, Math.min(3, recommendations.length))
+    .map((_, idx) => idx + 1);
+  const keyboardSelected = await promptMarketplaceSelectionByKeys(locale, recommendations, defaultSelection);
+  if (keyboardSelected) {
+    return keyboardSelected.map((idx) => candidates[idx]).filter(Boolean);
   }
 
   const rl = readline.createInterface({ input, output });
-  const answer = (
-    await rl.question(
-      `${say(locale, "Select items to attach (e.g. 1,3; 'a' for all; Enter to skip)", "选择要挂载的项（如 1,3；输入 a 表示全选；直接回车跳过")}: `
+  info(
+    say(
+      locale,
+      `Select items to attach (e.g. 1,3; 'a' all; 's' skip; Enter=accept default ${defaultSelection.join(",")})`,
+      `选择要挂载的项（如 1,3；a 全选；s 跳过；直接回车=采用默认 ${defaultSelection.join(",")}）`
     )
+  );
+  const answer = (
+    await askInputLine(rl)
   ).trim();
   rl.close();
+  if (!answer) {
+    return defaultSelection.map((idx) => candidates[idx - 1]).filter(Boolean);
+  }
 
   const selectedIndexes = parseSelectionInput(answer, candidates.length);
   return selectedIndexes.map((idx) => candidates[idx - 1]).filter(Boolean);
+}
+
+async function promptMarketplaceSelectionByKeys(
+  locale: InteractionLocale,
+  recommendations: MarketplaceRecommendation[],
+  defaultSelectionOneBased: number[]
+): Promise<number[] | null> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return null;
+  if (recommendations.length === 0) return [];
+  const moveHint = say(
+    locale,
+    "Use Up/Down to move, Space to toggle, Enter to confirm, A all, S clear, Esc cancel.",
+    "使用上下键移动，空格勾选/取消，回车确认，A 全选，S 清空，Esc 取消。"
+  );
+
+  const selected = new Set(defaultSelectionOneBased.map((n) => n - 1).filter((n) => n >= 0 && n < recommendations.length));
+  let cursor = 0;
+  let resolved = false;
+  let cancelled = false;
+  let lineCount = 0;
+  const stdin = process.stdin;
+  const stdout = process.stdout;
+  const render = (): void => {
+    const lines: string[] = [];
+    lines.push(moveHint);
+    for (let i = 0; i < recommendations.length; i += 1) {
+      const item = recommendations[i];
+      const pointer = i === cursor ? ">" : " ";
+      const mark = selected.has(i) ? "[x]" : "[ ]";
+      lines.push(`${pointer} ${mark} ${i + 1}) ${item.candidate.id} (${item.candidate.type}, risk=${item.candidate.risk_level ?? "low"})`);
+    }
+    if (lineCount > 0) {
+      stdout.write(`\x1b[${lineCount}F`);
+    }
+    const nextCount = Math.max(lineCount, lines.length);
+    for (let i = 0; i < nextCount; i += 1) {
+      stdout.write("\x1b[2K");
+      if (i < lines.length) stdout.write(lines[i]);
+      stdout.write("\n");
+    }
+    lineCount = nextCount;
+  };
+  const cleanup = (): void => {
+    if (stdin.setRawMode) stdin.setRawMode(false);
+    stdin.pause();
+    stdin.off("keypress", onKeypress);
+    stdout.write("\x1b[?25h");
+    if (lineCount > 0) {
+      stdout.write(`\x1b[${lineCount}F`);
+      for (let i = 0; i < lineCount; i += 1) {
+        stdout.write("\x1b[2K\n");
+      }
+      stdout.write(`\x1b[${lineCount}F`);
+    }
+  };
+  const onKeypress = (_str: string, key: readlineCore.Key): void => {
+    if (resolved) return;
+    if (key.name === "up") {
+      cursor = (cursor - 1 + recommendations.length) % recommendations.length;
+      render();
+      return;
+    }
+    if (key.name === "down") {
+      cursor = (cursor + 1) % recommendations.length;
+      render();
+      return;
+    }
+    if (key.name === "space") {
+      if (selected.has(cursor)) selected.delete(cursor);
+      else selected.add(cursor);
+      render();
+      return;
+    }
+    if (key.name === "a") {
+      if (selected.size === recommendations.length) selected.clear();
+      else for (let i = 0; i < recommendations.length; i += 1) selected.add(i);
+      render();
+      return;
+    }
+    if (key.name === "s") {
+      selected.clear();
+      render();
+      return;
+    }
+    if (key.name === "return" || key.name === "enter") {
+      resolved = true;
+      return;
+    }
+    if (key.name === "escape" || (key.ctrl && key.name === "c")) {
+      cancelled = true;
+      resolved = true;
+      return;
+    }
+  };
+
+  readlineCore.emitKeypressEvents(stdin);
+  if (stdin.setRawMode) stdin.setRawMode(true);
+  stdin.resume();
+  stdout.write("\x1b[?25l");
+  stdin.on("keypress", onKeypress);
+  render();
+  await new Promise<void>((resolve) => {
+    const timer = setInterval(() => {
+      if (resolved) {
+        clearInterval(timer);
+        resolve();
+      }
+    }, 16);
+  });
+  cleanup();
+  if (cancelled) return [];
+  return Array.from(selected).sort((a, b) => a - b);
 }
 
 function uniqueStrings(items: string[]): string[] {
@@ -327,25 +622,29 @@ async function deriveCapabilityDomains(options: {
   plannerModel: string;
   plannerExecMode: "live" | "mock";
   locale: InteractionLocale;
+  silent: boolean;
   out: UpOutput;
 }): Promise<CapabilityDomain[]> {
-  const { discovery, plannerModel, plannerExecMode, locale, out } = options;
+  const { discovery, plannerModel, plannerExecMode, locale, silent, out } = options;
   const fallback = fallbackCapabilityDomains(discovery);
   if (plannerExecMode !== "live") {
     return fallback;
   }
   try {
-    out.info(say(locale, "AI is deriving capability domains ...", "AI 正在推导能力域，请稍候 ..."));
-    const response = await invokeModel(
-      {
-        model: plannerModel,
-        prompt:
-          `Derive 3-6 capability domains for this team setup.\n` +
-          `Each domain should be responsibility-oriented and actionable for agent design.\n` +
-          `Return JSON only: {"domains":[{"id":"...","name":"...","objective":"...","keywords":["..."]}]}\n\n` +
-          `Discovery:\n${JSON.stringify(discovery, null, 2)}`
-      },
-      "live"
+    const response = await withSpinner(
+      !silent,
+      say(locale, "AI deriving capability domains", "AI 正在推导能力域"),
+      () => invokeModel(
+        {
+          model: plannerModel,
+          prompt:
+            `Derive 3-6 capability domains for this team setup.\n` +
+            `Each domain should be responsibility-oriented and actionable for agent design.\n` +
+            `Return JSON only: {"domains":[{"id":"...","name":"...","objective":"...","keywords":["..."]}]}\n\n` +
+            `Discovery:\n${JSON.stringify(discovery, null, 2)}`
+        },
+        "live"
+      )
     );
     return parseCapabilityDomains(response.text, fallback);
   } catch (e) {
@@ -363,7 +662,7 @@ async function runAiDiscoveryInterview(options: {
   silent: boolean;
 }): Promise<DiscoveryAnswers> {
   const { plannerModel, initialPrompt, aiTurns, defaults, locale, silent } = options;
-  const waitMsg = locale === "zh" ? "AI 正在分析你的输入，请稍候..." : "AI is analyzing your input, please wait...";
+  const waitMsg = locale === "zh" ? "AI 正在分析你的输入" : "AI is analyzing your input";
   const langRule =
     locale === "zh"
       ? "Use Simplified Chinese for user-facing questions and guidance; keep tool/framework/model names in English."
@@ -374,19 +673,22 @@ async function runAiDiscoveryInterview(options: {
   let draft = defaults;
 
   for (let i = 0; i < aiTurns; i += 1) {
-    if (!silent) info(waitMsg);
-    const step = await invokeModel(
-      {
-        model: plannerModel,
-        prompt:
-          `You are onboarding a user into a team-configuration workflow.\n` +
-          `${langRule}\n` +
-          `Follow policy: clarify goal -> outcome -> target -> constraints -> human-loop.\n` +
-          `Return JSON only: {"done":boolean,"question":string,"draft":{"teamName":string,"problem":string,"outcome":string,"target":string,"priority":string,"constraints":string,"humanLoop":string}}\n\n` +
-          `Current draft:\n${JSON.stringify(draft, null, 2)}\n\n` +
-          `Transcript:\n${transcript.map((t) => `${t.role}: ${t.text}`).join("\n")}`
-      },
-      "live"
+    const step = await withSpinner(
+      !silent,
+      waitMsg,
+      () => invokeModel(
+        {
+          model: plannerModel,
+          prompt:
+            `You are onboarding a user into a team-configuration workflow.\n` +
+            `${langRule}\n` +
+            `Follow policy: clarify goal -> outcome -> target -> constraints -> human-loop.\n` +
+            `Return JSON only: {"done":boolean,"question":string,"draft":{"teamName":string,"problem":string,"outcome":string,"target":string,"priority":string,"constraints":string,"humanLoop":string}}\n\n` +
+            `Current draft:\n${JSON.stringify(draft, null, 2)}\n\n` +
+            `Transcript:\n${transcript.map((t) => `${t.role}: ${t.text}`).join("\n")}`
+        },
+        "live"
+      )
     );
     const parsed = parseJsonFromText<{ done?: boolean; question?: string; draft?: Partial<DiscoveryAnswers> }>(step.text, {});
     draft = parseAiRefinedDiscovery(JSON.stringify(parsed.draft ?? {}), draft);
@@ -421,7 +723,7 @@ async function runAiDiscoveryInterview(options: {
     if (!silent) info(displayQuestion);
 
     const rl = readline.createInterface({ input, output });
-    const answer = (await rl.question(">> ")).trim();
+    const answer = (await askInputLine(rl)).trim();
     rl.close();
     if (!answer) continue;
 
@@ -429,18 +731,21 @@ async function runAiDiscoveryInterview(options: {
     transcript.push({ role: "user", text: answer });
   }
 
-  if (!silent) info(waitMsg);
-  const final = await invokeModel(
-    {
-      model: plannerModel,
-      prompt:
-        `Finalize discovery into strict JSON with keys: teamName, problem, outcome, target, priority, constraints, humanLoop.\n` +
-        `${langRule}\n` +
-        `Return keys in English.\n\n` +
-        `Draft:\n${JSON.stringify(draft, null, 2)}\n\n` +
-        `Transcript:\n${transcript.map((t) => `${t.role}: ${t.text}`).join("\n")}`
-    },
-    "live"
+  const final = await withSpinner(
+    !silent,
+    locale === "zh" ? "AI 正在整理最终配置" : "AI is finalizing configuration",
+    () => invokeModel(
+      {
+        model: plannerModel,
+        prompt:
+          `Finalize discovery into strict JSON with keys: teamName, problem, outcome, target, priority, constraints, humanLoop.\n` +
+          `${langRule}\n` +
+          `Return keys in English.\n\n` +
+          `Draft:\n${JSON.stringify(draft, null, 2)}\n\n` +
+          `Transcript:\n${transcript.map((t) => `${t.role}: ${t.text}`).join("\n")}`
+      },
+      "live"
+    )
   );
   return parseAiRefinedDiscovery(final.text, draft);
 }
@@ -479,11 +784,12 @@ async function collectDiscovery(options: {
   if (options.plannerExecMode === "live") {
     const promptText = say(
       options.locale ?? "en",
-      "Describe your project/team need in one sentence: ",
+      "Describe your project/team need in one sentence:",
       "请用一句话描述你的项目/团队需求："
     );
     const rl = readline.createInterface({ input, output });
-    const initial = (await rl.question(promptText)).trim();
+    info(promptText);
+    const initial = (await askInputLine(rl)).trim();
     rl.close();
     const seededText = initial || defaultProblem;
     const seededName = options.name ?? seededText ?? defaultName;
@@ -517,12 +823,22 @@ async function collectDiscovery(options: {
     defaultValue: T
   ): Promise<T> {
     const defaultChoice = choices.find((c) => c.value === defaultValue) ?? choices[0];
+    const keyboardSelected = await promptSingleChoiceByKeys({
+      title: question,
+      choices,
+      defaultValue: defaultChoice.value,
+      locale
+    });
+    if (keyboardSelected) {
+      return keyboardSelected;
+    }
     info(question);
     for (const c of choices) {
       info(`  ${c.key}) ${c.label}`);
     }
+    info(say(locale, `Enter option number (default ${defaultChoice?.key})`, `输入选项编号（默认 ${defaultChoice?.key}）`));
     while (true) {
-      const answer = (await rl.question(`${say(locale, "Select", "选择")} [${defaultChoice?.key}]: `)).trim();
+      const answer = (await askInputLine(rl)).trim();
       if (!answer) {
         return defaultChoice.value;
       }
@@ -544,11 +860,13 @@ async function collectDiscovery(options: {
     if (selected !== "__custom__") {
       return selected;
     }
-    const custom = (await rl.question(`   ${say(locale, "Enter custom text", "输入自定义内容")} [${fallback}]: `)).trim();
+    info(`   ${say(locale, "Enter custom text", "输入自定义内容")} [${fallback}]`);
+    const custom = (await askInputLine(rl)).trim();
     return custom || fallback;
   }
 
-  const teamName = (await rl.question(`1) ${say(locale, "Team name", "团队名称")} [${defaultName}]: `)).trim() || defaultName;
+  info(`1) ${say(locale, "Team name", "团队名称")} [${defaultName}]`);
+  const teamName = (await askInputLine(rl)).trim() || defaultName;
   if (hasCjkText(teamName)) {
     locale = "zh";
   }
@@ -617,12 +935,17 @@ async function collectDiscovery(options: {
     return { priority: inferredPriority, humanLoop: inferredHuman };
   };
   const inferred = inferPriorityAndHumanLoop();
-  const advanced = (await rl.question(`6) ${say(locale, "Need advanced tuning for priority/approval? [y/N]: ", "是否进行高级调整（优先级/审批）? [y/N]: ")}`))
-    .trim()
-    .toLowerCase();
+  const advanced = await askChoice(
+    `6) ${say(locale, "Need advanced tuning for priority/approval?", "是否进行高级调整（优先级/审批）?")}`,
+    [
+      { key: "1", label: choiceLabel(locale, "No (recommended)", "否（推荐）"), value: "no" },
+      { key: "2", label: choiceLabel(locale, "Yes", "是"), value: "yes" }
+    ],
+    "no"
+  );
   let priority: Priority = inferred.priority;
   let humanLoop: HumanLoop = inferred.humanLoop;
-  if (advanced === "y" || advanced === "yes") {
+  if (advanced === "yes") {
     priority = await askChoice(
       `7) ${say(locale, "Optimization priority:", "优化优先级:")}`,
       [
@@ -701,6 +1024,94 @@ interface UpOutput {
   success: (msg: string) => void;
   vkv: (key: string, value: string | number | boolean) => void;
   vstatus: (kind: "ok" | "warn" | "fail", label: string, detail: string) => void;
+}
+
+function uniqueTeamAlias(baseName: string): string {
+  for (let i = 2; i <= 99; i += 1) {
+    const alias = `${baseName}-${i}`;
+    if (!findRegistryTeam(alias)) return alias;
+  }
+  return `${baseName}-${Date.now()}`;
+}
+
+async function resolveTeamEntryForDiscovery(options: {
+  discovery: DiscoveryAnswers;
+  goal: string;
+  locale: InteractionLocale;
+  force: boolean;
+  nonInteractive: boolean;
+  silent: boolean;
+  out: UpOutput;
+}): Promise<RegistryEntry> {
+  const { discovery, goal, locale, force, nonInteractive, silent, out } = options;
+  if (force) {
+    return createTeamInRegistry(discovery.teamName, goal, true);
+  }
+  const existing = findRegistryTeam(discovery.teamName);
+  if (!existing) {
+    return createTeamInRegistry(discovery.teamName, goal, false);
+  }
+
+  if (nonInteractive || silent) {
+    out.status(
+      "warn",
+      "team_exists_reuse",
+      say(locale, `team exists, reuse current: ${existing.slug}`, `团队已存在，自动复用: ${existing.slug}`)
+    );
+    useRegistryTeam(existing.slug);
+    return existing;
+  }
+
+  info(
+    say(
+      locale,
+      `Team already exists: ${existing.name} (${existing.slug})`,
+      `团队已存在: ${existing.name} (${existing.slug})`
+    )
+  );
+  const action = await promptSingleChoiceByKeys({
+    title: say(locale, "Choose next action:", "请选择后续动作:"),
+    locale,
+    choices: [
+      { key: "1", label: say(locale, "Reuse existing team (recommended)", "复用现有团队（推荐）"), value: "reuse" },
+      { key: "2", label: say(locale, "Overwrite existing team", "覆盖现有团队"), value: "overwrite" },
+      { key: "3", label: say(locale, "Create with new alias", "使用新别名创建"), value: "alias" }
+    ],
+    defaultValue: "reuse"
+  });
+  if (action === "overwrite") {
+    return createTeamInRegistry(discovery.teamName, goal, true);
+  }
+  if (action === "alias") {
+    const rl = readline.createInterface({ input, output });
+    const suggested = uniqueTeamAlias(discovery.teamName);
+    info(say(locale, `Enter alias team name [${suggested}]`, `输入别名团队名称 [${suggested}]`));
+    const aliasInput = (await askInputLine(rl)).trim();
+    rl.close();
+    const alias = aliasInput || suggested;
+    return createTeamInRegistry(alias, goal, false);
+  }
+  if (!action) {
+    info(say(locale, "Choose next action:", "请选择后续动作:"));
+    info(`  1) ${say(locale, "Reuse existing team (recommended)", "复用现有团队（推荐）")}`);
+    info(`  2) ${say(locale, "Overwrite existing team", "覆盖现有团队")}`);
+    info(`  3) ${say(locale, "Create with new alias", "使用新别名创建")}`);
+    const rl = readline.createInterface({ input, output });
+    const answer = (await askInputLine(rl)).trim();
+    rl.close();
+    if (answer === "2") return createTeamInRegistry(discovery.teamName, goal, true);
+    if (answer === "3") {
+      const suggested = uniqueTeamAlias(discovery.teamName);
+      const rl2 = readline.createInterface({ input, output });
+      info(say(locale, `Enter alias team name [${suggested}]`, `输入别名团队名称 [${suggested}]`));
+      const aliasInput = (await askInputLine(rl2)).trim();
+      rl2.close();
+      const alias = aliasInput || suggested;
+      return createTeamInRegistry(alias, goal, false);
+    }
+  }
+  useRegistryTeam(existing.slug);
+  return existing;
 }
 
 function stageLine(locale: InteractionLocale, current: number, total: number, enLabel: string, zhLabel: string): string {
@@ -822,6 +1233,7 @@ async function applyResourceAndTopology(options: {
     plannerModel,
     plannerExecMode,
     locale,
+    silent,
     out
   });
   out.status("ok", "capability_domains", `count=${capabilityDomains.length}`);
@@ -838,7 +1250,6 @@ async function applyResourceAndTopology(options: {
   );
   try {
     if (plannerExecMode === "live") {
-      out.info(say(locale, "AI is designing the team topology ...", "AI 正在设计团队拓扑，请稍候 ..."));
       const topologyPrompt =
         `Design an execution-agent team topology for this project.\n` +
         `Must include a lead agent that coordinates the team.\n` +
@@ -851,12 +1262,16 @@ async function applyResourceAndTopology(options: {
         `Capability domains:\n${JSON.stringify(capabilityDomains, null, 2)}\n\n` +
         `Available skills:\n${team.resources.skills.map((s) => s.id).join(", ")}\n` +
         `Available mcps:\n${team.resources.mcps.map((m) => m.id).join(", ")}`;
-      const aiTopology = await invokeModel(
-        {
-          model: plannerModel,
-          prompt: topologyPrompt
-        },
-        "live"
+      const aiTopology = await withSpinner(
+        !silent,
+        say(locale, "AI designing team topology", "AI 正在设计团队拓扑"),
+        () => invokeModel(
+          {
+            model: plannerModel,
+            prompt: topologyPrompt
+          },
+          "live"
+        )
       );
       topology = parseAiTopology(aiTopology.text, topology);
     }
@@ -870,7 +1285,7 @@ async function applyResourceAndTopology(options: {
   try {
     const openTeamConfig = loadOrCreateOpenTeamConfig();
     const domainText = capabilityDomains.flatMap((d) => [d.name, d.objective, ...d.keywords]).join(" ");
-    const candidates = recommendMarketplaceCandidates(
+    const recommendation = recommendMarketplaceCandidatesDetailed(
       {
         teamName: discovery.teamName,
         problem: `${discovery.problem} ${domainText}`,
@@ -879,10 +1294,13 @@ async function applyResourceAndTopology(options: {
       },
       team,
       openTeamConfig,
-      { skills: 3, mcps: 3 }
+      { skills: 3, mcps: 3, allowHighRisk: false }
     );
-    if (candidates.length > 0 && !nonInteractive && !silent) {
-      const selected = await promptMarketplaceSelection(locale, candidates);
+    if (recommendation.items.length > 0 && !nonInteractive && !silent) {
+      const selected = await promptMarketplaceSelection(locale, recommendation.items, {
+        domain: recommendation.domain,
+        blockedHighRiskCount: recommendation.blocked_high_risk_count
+      });
       if (selected.length > 0) {
         const attached = attachRecommendedResources(team, selected, {
           domainKeywords: capabilityDomains.flatMap((d) => [d.id, d.name, ...d.keywords])
@@ -896,6 +1314,15 @@ async function applyResourceAndTopology(options: {
         if (attached.mcpsAdded.length > 0) out.vkv("mcps_added", attached.mcpsAdded.join(", "));
       } else {
         out.vstatus("warn", "marketplace_attach", "no recommended resources selected");
+      }
+    } else if (recommendation.items.length > 0 && (nonInteractive || silent)) {
+      const defaults = recommendation.items.slice(0, Math.min(3, recommendation.items.length)).map((x) => x.candidate);
+      const attached = attachRecommendedResources(team, defaults, {
+        domainKeywords: capabilityDomains.flatMap((d) => [d.id, d.name, ...d.keywords])
+      });
+      out.status("ok", "marketplace_attach", `skills=${attached.skillsAdded.length}, mcps=${attached.mcpsAdded.length}`);
+      if (recommendation.blocked_high_risk_count > 0) {
+        out.vstatus("warn", "high_risk_filtered", `filtered=${recommendation.blocked_high_risk_count}`);
       }
     }
   } catch (e) {
@@ -956,7 +1383,15 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
 
     const target = discovery.target;
     const goal = `${discovery.problem}. Success outcome: ${discovery.outcome}. Constraints: ${discovery.constraints}.`;
-    const entry = createTeamInRegistry(discovery.teamName, goal, Boolean(options.force));
+    const entry = await resolveTeamEntryForDiscovery({
+      discovery,
+      goal,
+      locale,
+      force: Boolean(options.force),
+      nonInteractive: Boolean(options.nonInteractive),
+      silent,
+      out
+    });
     useRegistryTeam(entry.slug);
 
 
@@ -998,18 +1433,21 @@ export async function runUpFlow(options: UpCommandOptions): Promise<UpFlowResult
       `Priority: ${discovery.priority}\n` +
       `Human loop: ${discovery.humanLoop}\n`;
     try {
-      out.info(say(locale, "AI is generating planning notes ...", "AI 正在生成规划说明，请稍候 ..."));
-      const aiPlan = await invokeModel(
-        {
-          model: plannerModel,
-          prompt:
-            `You are an OpenTeam planner.\n` +
-            `Follow this methodology strictly:\n${methodology}\n\n` +
-            `Discovery:\n${JSON.stringify(discovery, null, 2)}\n\n` +
-            `Generate markdown with sections:\n` +
-            `- Team Topology\n- Agent Responsibilities\n- Skill/MCP Selection\n- Risks & Guardrails\n- First 3 Actions`
-        },
-        plannerExecMode
+      const aiPlan = await withSpinner(
+        !silent,
+        say(locale, "AI generating planning notes", "AI 正在生成规划说明"),
+        () => invokeModel(
+          {
+            model: plannerModel,
+            prompt:
+              `You are an OpenTeam planner.\n` +
+              `Follow this methodology strictly:\n${methodology}\n\n` +
+              `Discovery:\n${JSON.stringify(discovery, null, 2)}\n\n` +
+              `Generate markdown with sections:\n` +
+              `- Team Topology\n- Agent Responsibilities\n- Skill/MCP Selection\n- Risks & Guardrails\n- First 3 Actions`
+          },
+          plannerExecMode
+        )
       );
       planningNote = aiPlan.text || planningNote;
     } catch (e) {

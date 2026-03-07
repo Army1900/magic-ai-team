@@ -14,6 +14,7 @@ OpenTeam is not another single-agent runner. It is a Team OS layer on top of tar
 ## Key Features
 
 - One-command flow: `up -> export -> handoff -> start` via `openteam go`.
+- Shared quality-gate core used by both `go` and `export` (single rule path, lower change impact).
 - Discovery + capability-domain-first topology design (AI-first, fallback rules).
 - Resource recommendation with feedback loop (run outcomes feed future ranking).
 - Agent quality evaluation after run (contract/format/risk checks).
@@ -173,12 +174,14 @@ OpenTeam quality audit includes:
 - Security score
 - Overall score
 - Findings by source: `policy`, `semantic`, `scanner`
+- Unified gate output for CLI + JSON via shared quality-gate orchestrator (`go`/`export` same semantics)
 
 Scanner integration in current version:
 
 - Runs real scans when tools are available (`gitleaks`, `semgrep`, `trivy`)
 - Converts scanner findings into `warn/fail` quality findings
 - Keeps missing-tool cases as non-blocking warnings
+- Caches scanner command availability checks to reduce repeated process spawning
 
 ## Resource Recommendation Feedback Loop
 
@@ -276,3 +279,4 @@ Report includes:
 - Use `openteam provider test --provider <openai|anthropic>` to check connectivity.
 - High-risk bypass must be explicit: `--ignore-high-risk`.
 - `go` stores last-used preferences in `<OPENTEAM_HOME>/openteam.yaml` and reuses them on the next run unless CLI args override.
+- `go` history write failures are non-fatal (main flow continues; warning only).

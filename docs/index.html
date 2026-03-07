@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenTeam | Team OS for Agent Frameworks</title>
+    <meta
+      name="description"
+      content="OpenTeam 是面向多 Agent 团队设计、治理与导出的 Team OS CLI。AI 驱动发现，质量门禁护航，一键导出主流框架。"
+    />
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap");
+
+      :root {
+        --bg: #f7f4ed;
+        --bg-end: #f3f1eb;
+        --glow-a: rgba(34, 163, 159, 0.15);
+        --glow-b: rgba(25, 85, 230, 0.14);
+        --bg-soft: #efe9dc;
+        --panel: rgba(255, 255, 255, 0.72);
+        --text: #191817;
+        --muted: #6c665c;
+        --accent: #1955e6;
+        --accent-2: #22a39f;
+        --ok: #118a50;
+        --warn: #b77217;
+        --fail: #b52a2a;
+        --border: rgba(25, 24, 23, 0.14);
+        --radius: 18px;
+        --shadow: 0 14px 42px rgba(20, 20, 20, 0.09);
+      }
+
+      body.theme-terminal {
+        --bg: #070b12;
+        --bg-end: #0a1220;
+        --glow-a: rgba(37, 214, 184, 0.16);
+        --glow-b: rgba(78, 129, 255, 0.2);
+        --bg-soft: #0f1a2a;
+        --panel: rgba(12, 20, 34, 0.82);
+        --text: #f3f7ff;
+        --muted: #a8b6d8;
+        --accent: #63a6ff;
+        --accent-2: #37d9cb;
+        --ok: #22bf78;
+        --warn: #ffbf57;
+        --fail: #ff5f6d;
+        --border: rgba(122, 154, 221, 0.26);
+        --shadow: 0 18px 52px rgba(0, 0, 0, 0.5);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        background:
+          radial-gradient(1200px 700px at -5% -10%, var(--glow-a), transparent 56%),
+          radial-gradient(900px 600px at 100% 0%, var(--glow-b), transparent 52%),
+          linear-gradient(180deg, var(--bg), var(--bg-end));
+        font-family: "Outfit", "Segoe UI", sans-serif;
+        line-height: 1.5;
+      }
+
+      .noise::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+        opacity: 0.045;
+        background-image:
+          repeating-linear-gradient(0deg, transparent 0, transparent 3px, #000 3px, #000 4px),
+          repeating-linear-gradient(90deg, transparent 0, transparent 5px, #000 5px, #000 6px);
+      }
+
+      .container {
+        width: min(1120px, 92vw);
+        margin: 0 auto;
+      }
+
+      header {
+        padding: 28px 0 16px;
+      }
+
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .logo {
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        font-size: 1.15rem;
+      }
+
+      .logo span {
+        color: var(--accent);
+      }
+
+      .repo {
+        font-family: "JetBrains Mono", monospace;
+        color: var(--muted);
+        font-size: 0.83rem;
+        text-decoration: none;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 8px 14px;
+        background: color-mix(in srgb, var(--panel) 72%, transparent);
+      }
+
+      .top-actions {
+        display: inline-flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .theme-toggle {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.78rem;
+        color: var(--text);
+        background: color-mix(in srgb, var(--panel) 72%, transparent);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 8px 12px;
+        cursor: pointer;
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 26px;
+        padding: 24px 0 36px;
+        align-items: stretch;
+      }
+
+      .panel {
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+        backdrop-filter: blur(6px);
+      }
+
+      body.theme-terminal .panel {
+        backdrop-filter: blur(8px);
+      }
+
+      .hero-main {
+        padding: 34px;
+      }
+
+      .tag {
+        display: inline-flex;
+        padding: 6px 10px;
+        border-radius: 999px;
+        background: rgba(25, 85, 230, 0.1);
+        color: var(--accent);
+        font-size: 0.82rem;
+        margin-bottom: 12px;
+      }
+
+      h1 {
+        margin: 0 0 12px;
+        font-size: clamp(1.95rem, 4vw, 3.15rem);
+        line-height: 1.08;
+      }
+
+      .sub {
+        margin: 0;
+        color: var(--muted);
+        max-width: 60ch;
+      }
+
+      .cta-row {
+        margin-top: 24px;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+
+      .btn {
+        display: inline-block;
+        text-decoration: none;
+        font-weight: 600;
+        padding: 10px 14px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+      }
+
+      .btn.primary {
+        background: linear-gradient(120deg, var(--accent), #4f84ff 65%, var(--accent-2));
+        color: #fff;
+        border-color: transparent;
+        box-shadow: 0 10px 24px rgba(62, 127, 255, 0.34);
+      }
+
+      .btn.ghost {
+        color: var(--text);
+        background: color-mix(in srgb, var(--panel) 68%, transparent);
+      }
+
+      .hero-side {
+        padding: 20px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .phase {
+        display: grid;
+        grid-template-columns: 26px 1fr;
+        gap: 10px;
+        padding: 8px 0;
+      }
+
+      .dot {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        margin-top: 5px;
+        border: 1px solid var(--border);
+        animation: pulse 2.4s infinite ease-in-out;
+      }
+
+      .dot.ok {
+        background: var(--ok);
+      }
+
+      .dot.warn {
+        background: var(--warn);
+      }
+
+      .dot.fail {
+        background: var(--fail);
+      }
+
+      .phase b {
+        font-size: 0.92rem;
+      }
+
+      .phase small {
+        display: block;
+        color: var(--muted);
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .feature {
+        padding: 18px;
+      }
+
+      .feature h3 {
+        margin: 0 0 6px;
+        font-size: 1rem;
+      }
+
+      .feature p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      .section-title {
+        margin: 14px 0 12px;
+        font-size: 1.42rem;
+      }
+
+      .commands {
+        margin-top: 12px;
+        padding: 20px;
+      }
+
+      pre {
+        margin: 0;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.85rem;
+        overflow: auto;
+        color: #ecf1ff;
+        background: #131725;
+        border-radius: 12px;
+        padding: 14px;
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      body.theme-terminal pre {
+        background: #090f1a;
+        border-color: rgba(98, 137, 210, 0.35);
+        color: #dce8ff;
+        box-shadow: inset 0 0 0 1px rgba(93, 129, 194, 0.2);
+      }
+
+      .repo-box {
+        margin-top: 16px;
+        padding: 18px;
+      }
+
+      .repo-box code {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.84rem;
+        display: block;
+        margin-top: 8px;
+        color: #25345c;
+      }
+
+      body.theme-terminal .repo-box code {
+        color: #b8ccff;
+      }
+
+      body.theme-terminal .tag {
+        background: rgba(99, 166, 255, 0.16);
+        box-shadow: inset 0 0 0 1px rgba(99, 166, 255, 0.26);
+      }
+
+      footer {
+        padding: 28px 0 42px;
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+
+      .fade-in {
+        opacity: 0;
+        transform: translateY(14px);
+        transition: opacity 0.6s ease, transform 0.6s ease;
+      }
+
+      .fade-in.is-visible {
+        opacity: 1;
+        transform: translateY(0);
+      }
+
+      @keyframes rise {
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      @keyframes pulse {
+        0%, 100% {
+          transform: scale(1);
+          box-shadow: 0 0 0 0 rgba(25, 85, 230, 0.2);
+        }
+        50% {
+          transform: scale(1.07);
+          box-shadow: 0 0 0 8px rgba(25, 85, 230, 0);
+        }
+      }
+
+      @media (max-width: 960px) {
+        .hero {
+          grid-template-columns: 1fr;
+        }
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body class="noise">
+    <header class="container">
+      <div class="topbar">
+        <div class="logo">Open<span>Team</span></div>
+        <div class="top-actions">
+          <button class="theme-toggle" id="theme-toggle" type="button">Theme: Paper</button>
+          <a class="repo" href="https://github.com/Army1900/openteam" target="_blank" rel="noreferrer">GitHub Repository</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="hero">
+        <article class="panel hero-main fade-in">
+          <div class="tag">Model-driven Team OS CLI</div>
+          <h1>把“单 Agent”升级成<br />可治理的 AI 团队系统</h1>
+          <p class="sub">
+            OpenTeam 不是另一个跑命令的外壳，而是一层 Team OS：从访谈建模、团队拓扑设计、质量门禁、风险审查，到一键导出
+            OpenCode / Claude / OpenClaw / Codex 等目标框架，形成可落地、可审计、可迭代的团队交付链路。
+          </p>
+          <div class="cta-row">
+            <a class="btn primary" href="#start">查看快速开始</a>
+            <a class="btn ghost" href="https://github.com/Army1900/openteam" target="_blank" rel="noreferrer">阅读源码</a>
+          </div>
+        </article>
+
+        <aside class="panel hero-side fade-in">
+          <div class="phase">
+            <span class="dot ok"></span>
+            <div><b>up</b><small>AI discovery + team topology</small></div>
+          </div>
+          <div class="phase">
+            <span class="dot warn"></span>
+            <div><b>export</b><small>quality gate + policy + compatibility</small></div>
+          </div>
+          <div class="phase">
+            <span class="dot ok"></span>
+            <div><b>handoff</b><small>TEAM_BRIEF + START_PROMPT</small></div>
+          </div>
+          <div class="phase">
+            <span class="dot ok"></span>
+            <div><b>start</b><small>launcher check + run/monitor</small></div>
+          </div>
+        </aside>
+      </section>
+
+      <h2 class="section-title">为什么它和普通 Agent 工具不一样</h2>
+      <section class="grid">
+        <article class="panel feature fade-in">
+          <h3>团队级编排，不是单体 Prompt</h3>
+          <p>支持多 Agent 角色、输入输出契约、协作流和资源绑定，贴近真实工程团队分工。</p>
+        </article>
+        <article class="panel feature fade-in">
+          <h3>门禁前置，默认更安全</h3>
+          <p>高风险资源默认阻断；quality / policy / compatibility / self-check 串联，避免“导出了才发现不可用”。</p>
+        </article>
+        <article class="panel feature fade-in">
+          <h3>可解释的执行轨迹</h3>
+          <p>phase timeline、summary 卡片、Fix now 命令、history/worklog 全链路留痕，方便复盘和审计。</p>
+        </article>
+      </section>
+
+      <section class="panel commands" id="start">
+        <h2 class="section-title" style="margin-top: 0">30 秒体验</h2>
+        <pre><code>npm install
+npm run build
+npm link
+
+openteam
+# 默认进入 go 流程: up -> export -> handoff -> start
+
+openteam go --project D:\Projects\my-app --target opencode --view advanced
+openteam history --limit 20
+openteam viewer --project D:\Projects\my-app</code></pre>
+      </section>
+
+      <section class="panel repo-box">
+        <h2 class="section-title" style="margin-top: 0">仓库地址</h2>
+        <p>你可以用 HTTPS 或 SSH 克隆，主页中直接公开展示：</p>
+        <code>HTTPS: https://github.com/Army1900/openteam</code>
+        <code>SSH: git@github.com:Army1900/openteam.git</code>
+      </section>
+    </main>
+
+    <footer class="container">
+      OpenTeam · AI 团队的设计、治理与导出中枢
+    </footer>
+    <script>
+      (function () {
+        const body = document.body;
+        const toggle = document.getElementById("theme-toggle");
+        const key = "openteam-site-theme";
+        const saved = localStorage.getItem(key);
+        const applyTheme = function (terminal) {
+          body.classList.toggle("theme-terminal", terminal);
+          if (toggle) toggle.textContent = terminal ? "Theme: Terminal" : "Theme: Paper";
+        };
+        applyTheme(saved === "terminal");
+        if (toggle) {
+          toggle.addEventListener("click", function () {
+            const nextTerminal = !body.classList.contains("theme-terminal");
+            applyTheme(nextTerminal);
+            localStorage.setItem(key, nextTerminal ? "terminal" : "paper");
+          });
+        }
+
+        const observer = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (entry.isIntersecting) {
+                entry.target.classList.add("is-visible");
+                observer.unobserve(entry.target);
+              }
+            });
+          },
+          { threshold: 0.2 }
+        );
+        document.querySelectorAll(".fade-in").forEach((el) => observer.observe(el));
+      })();
+    </script>
+  </body>
+</html>

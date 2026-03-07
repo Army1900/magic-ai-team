@@ -27,7 +27,7 @@ function withTempHome(fn: (home: string) => Promise<void>): Promise<void> {
   });
 }
 
-void run("runUpFlow requires --force to overwrite existing team", async () => {
+void run("runUpFlow reuses existing team by default and supports --force overwrite", async () => {
   await withTempHome(async () => {
     const base = {
       name: "Force Team",
@@ -43,10 +43,12 @@ void run("runUpFlow requires --force to overwrite existing team", async () => {
     assert.equal(first.ok, true);
 
     const second = await runUpFlow(base);
-    assert.equal(second.ok, false);
+    assert.equal(second.ok, true);
+    assert.equal(second.team_slug, first.team_slug);
 
     const third = await runUpFlow({ ...base, force: true });
     assert.equal(third.ok, true);
+    assert.equal(third.team_slug, first.team_slug);
   });
 }).catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
