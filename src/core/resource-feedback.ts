@@ -22,6 +22,8 @@ interface ResourceFeedbackStore {
   items: Record<string, ResourceFeedbackItem>;
 }
 
+let lastFeedbackWarning: string | null = null;
+
 function feedbackFilePath(): string {
   return path.join(ensureOpenTeamHome(), "resource-feedback.json");
 }
@@ -51,7 +53,8 @@ function loadStore(): ResourceFeedbackStore {
       updated_at: typeof raw.updated_at === "string" ? raw.updated_at : new Date().toISOString(),
       items: raw.items as Record<string, ResourceFeedbackItem>
     };
-  } catch {
+  } catch (e) {
+    lastFeedbackWarning = e instanceof Error ? `feedback read failed: ${e.message}` : `feedback read failed: ${String(e)}`;
     return emptyStore();
   }
 }
@@ -60,7 +63,8 @@ function saveStore(store: ResourceFeedbackStore): void {
   try {
     const file = feedbackFilePath();
     fs.writeFileSync(file, JSON.stringify(store, null, 2), "utf8");
-  } catch {
+  } catch (e) {
+    lastFeedbackWarning = e instanceof Error ? `feedback write failed: ${e.message}` : `feedback write failed: ${String(e)}`;
     // Non-blocking: feedback persistence should never break primary flow.
   }
 }
@@ -149,4 +153,10 @@ export function feedbackScoreDelta(type: FeedbackResourceType, id: string): numb
   if (avgCost <= 0.01) delta += 1;
   if (item.attached >= 3) delta += 1;
   return Math.max(-2, Math.min(4, delta));
+}
+
+export function consumeResourceFeedbackWarning(): string | null {
+  const msg = lastFeedbackWarning;
+  lastFeedbackWarning = null;
+  return msg;
 }

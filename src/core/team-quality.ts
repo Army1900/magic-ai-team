@@ -1,4 +1,6 @@
 import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { TeamConfig } from "./types";
 
 export interface TeamQualityFinding {
@@ -130,10 +132,70 @@ function scannerSummary(projectPath?: string): TeamQualityReport["scanner_summar
   });
 }
 
+function runScanner(
+  tool: "gitleaks" | "semgrep" | "trivy",
+  projectPath: string
+): { status: "ok" | "warn" | "fail"; detail: string } {
+  const cwd = path.resolve(projectPath);
+  if (!fs.existsSync(cwd)) {
+    return { status: "warn", detail: "project path not found" };
+  }
+  const args =
+    tool === "gitleaks"
+      ? ["detect", "--source", cwd, "--no-banner", "--redact", "--exit-code", "1"]
+      : tool === "semgrep"
+      ? ["scan", "--config", "auto", "--error", cwd]
+      : ["fs", "--quiet", "--severity", "HIGH,CRITICAL", "--exit-code", "1", cwd];
+
+  const result = spawnSync(tool, args, {
+    shell: true,
+    encoding: "utf8",
+    timeout: 60_000,
+    maxBuffer: 8 * 1024 * 1024
+  });
+  if (typeof result.status !== "number") {
+    return { status: "warn", detail: `scan timeout or interrupted (${tool})` };
+  }
+  if (result.status === 0) {
+    return { status: "ok", detail: "no blocking findings" };
+  }
+  if (result.status === 1) {
+    return { status: "fail", detail: "blocking findings detected" };
+  }
+  const err = String(result.stderr || result.stdout || "scanner execution error").trim().slice(0, 220);
+  return { status: "warn", detail: err || "scanner execution error" };
+}
+
 export function evaluateTeamQuality(team: TeamConfig, options: TeamQualityOptions = {}): TeamQualityReport {
   const findings: TeamQualityFinding[] = [];
   findings.push(...policyFindings(team));
   findings.push(...semanticFindings(team));
+  const scannerDetails = options.includeScanners ? scannerSummary(options.projectPath) : [];
+  const scannerOut = scannerDetails.map((row) => ({ ...row }));
+  if (options.includeScanners && options.projectPath) {
+    for (const row of scannerOut) {
+      if (!row.available) continue;
+      const tool = row.tool as "gitleaks" | "semgrep" | "trivy";
+      const result = runScanner(tool, options.projectPath);
+      row.status = result.status;
+      row.detail = result.detail;
+      if (result.status === "fail") {
+        findings.push({
+          severity: "fail",
+          code: `SCANNER_${tool.toUpperCase()}_DETECTED`,
+          message: `${tool}: ${result.detail}`,
+          source: "scanner"
+        });
+      } else if (result.status === "warn") {
+        findings.push({
+          severity: "warn",
+          code: `SCANNER_${tool.toUpperCase()}_WARN`,
+          message: `${tool}: ${result.detail}`,
+          source: "scanner"
+        });
+      }
+    }
+  }
 
   const modelCosts = team.execution_plane.agents.map((a) => costPer1k(a.model.primary));
   const avgCost = modelCosts.length > 0 ? modelCosts.reduce((s, n) => s + n, 0) / modelCosts.length : 0.006;
@@ -152,7 +214,7 @@ export function evaluateTeamQuality(team: TeamConfig, options: TeamQualityOption
   return {
     scores: { efficiency, performance, security, overall },
     findings,
-    scanner_summary: options.includeScanners ? scannerSummary(options.projectPath) : []
+    scanner_summary: scannerOut
   };
 }
 
@@ -167,4 +229,3 @@ export function applyHighRiskOverride(
       : f
   );
 }
-

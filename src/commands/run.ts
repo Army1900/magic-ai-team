@@ -5,7 +5,7 @@ import { evaluatePolicies } from "../core/policy";
 import { banner, error, info, kv, status, success } from "../core/ui";
 import { resolveTeamFileOrThrow } from "../core/current-team";
 import { appendWorklogEvent } from "../core/worklog";
-import { recordRunResourceFeedback } from "../core/resource-feedback";
+import { consumeResourceFeedbackWarning, recordRunResourceFeedback } from "../core/resource-feedback";
 import { evaluateAgentQuality } from "../core/agent-quality";
 
 export function registerRunCommand(program: Command): void {
@@ -66,6 +66,10 @@ export function registerRunCommand(program: Command): void {
         const quality = evaluateAgentQuality(team, artifact);
         const outPath = saveRunArtifact(artifact, team.observability.store.runs_dir);
         recordRunResourceFeedback(team, artifact);
+        const feedbackWarning = consumeResourceFeedbackWarning();
+        if (feedbackWarning && !options.json) {
+          status("warn", "feedback_persist", feedbackWarning);
+        }
         appendWorklogEvent(projectPath, {
           type: "run",
           team: team.team.name,
@@ -86,7 +90,8 @@ export function registerRunCommand(program: Command): void {
             budget_alert_count: artifact.budget_monitor?.alerts.length ?? 0,
             quality_ok: quality.ok,
             quality_failed_agents: quality.summary.failed_agents,
-            quality_warned_agents: quality.summary.warned_agents
+            quality_warned_agents: quality.summary.warned_agents,
+            feedback_warning: feedbackWarning ?? undefined
           }
         });
         for (const step of artifact.steps) {
@@ -126,6 +131,9 @@ export function registerRunCommand(program: Command): void {
             )
           );
           if (!artifact.success) {
+            process.exitCode = 1;
+          }
+          if (!quality.ok) {
             process.exitCode = 1;
           }
           return;

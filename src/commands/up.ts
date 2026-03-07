@@ -22,6 +22,7 @@ import {
   MarketplaceCandidate,
   recommendMarketplaceCandidates
 } from "../core/resource-recommendation";
+import { consumeResourceFeedbackWarning } from "../core/resource-feedback";
 import { buildRuleBasedTopology, parseAiTopology, TopologyDesign } from "../core/dynamic-topology";
 
 type Target = ExportTarget;
@@ -854,6 +855,10 @@ async function applyResourceAndTopology(options: {
         const attached = attachRecommendedResources(team, selected, {
           domainKeywords: capabilityDomains.flatMap((d) => [d.id, d.name, ...d.keywords])
         });
+        const feedbackWarning = consumeResourceFeedbackWarning();
+        if (feedbackWarning) {
+          out.vstatus("warn", "feedback_persist", feedbackWarning);
+        }
         out.status("ok", "marketplace_attach", `skills=${attached.skillsAdded.length}, mcps=${attached.mcpsAdded.length}`);
         if (attached.skillsAdded.length > 0) out.vkv("skills_added", attached.skillsAdded.join(", "));
         if (attached.mcpsAdded.length > 0) out.vkv("mcps_added", attached.mcpsAdded.join(", "));
