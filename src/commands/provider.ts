@@ -34,7 +34,7 @@ export function registerProviderCommand(program: Command): void {
         if (options.json) {
           let currentProvider: string | undefined;
           try {
-            currentProvider = loadOpenTeamConfig("openteam.yaml").current_provider;
+            currentProvider = loadOpenTeamConfig().current_provider;
           } catch {
             // ignore missing config
           }
@@ -44,7 +44,7 @@ export function registerProviderCommand(program: Command): void {
 
         banner("Provider Runtime");
         try {
-          kv("current_provider", loadOpenTeamConfig("openteam.yaml").current_provider ?? "openai");
+          kv("current_provider", loadOpenTeamConfig().current_provider ?? "openai");
         } catch {
           kv("current_provider", "openai");
         }

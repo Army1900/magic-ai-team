@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { resolveHomeOpenTeamConfigPath } from "../core/config";
 import {
   addMarketplace,
   loadOrCreateOpenTeamConfig,
@@ -15,7 +16,7 @@ export function registerMarketplaceCommand(program: Command): void {
   cmd
     .command("list")
     .description("List configured marketplaces")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .action((options) => {
       const cfg = loadOrCreateOpenTeamConfig(options.config);
       if (cfg.marketplaces.length === 0) {
@@ -34,7 +35,7 @@ export function registerMarketplaceCommand(program: Command): void {
     .requiredOption("--id <id>", "marketplace id")
     .requiredOption("--kind <kind>", "official|github|private")
     .requiredOption("--url <url>", "marketplace url")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .action((options) => {
       const cfg = loadOrCreateOpenTeamConfig(options.config);
       const ok = addMarketplace(cfg, {
@@ -56,7 +57,7 @@ export function registerMarketplaceCommand(program: Command): void {
     .command("remove")
     .description("Remove a marketplace source")
     .requiredOption("--id <id>", "marketplace id")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .action((options) => {
       const cfg = loadOrCreateOpenTeamConfig(options.config);
       const ok = removeMarketplace(cfg, options.id);
@@ -73,7 +74,7 @@ export function registerMarketplaceCommand(program: Command): void {
     .command("enable")
     .description("Enable a marketplace source")
     .requiredOption("--id <id>", "marketplace id")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .action((options) => {
       const cfg = loadOrCreateOpenTeamConfig(options.config);
       const ok = setMarketplaceEnabled(cfg, options.id, true);
@@ -90,7 +91,7 @@ export function registerMarketplaceCommand(program: Command): void {
     .command("disable")
     .description("Disable a marketplace source")
     .requiredOption("--id <id>", "marketplace id")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .action((options) => {
       const cfg = loadOrCreateOpenTeamConfig(options.config);
       const ok = setMarketplaceEnabled(cfg, options.id, false);
@@ -106,7 +107,7 @@ export function registerMarketplaceCommand(program: Command): void {
   cmd
     .command("sync")
     .description("Sync enabled marketplaces into local cache index")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .option("--cache-dir <path>", "cache dir", ".openteam/cache")
     .action((options) => {
       const cfg = loadOrCreateOpenTeamConfig(options.config);

@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
-import { loadTeamConfig } from "./config";
+import { loadTeamConfig, resolveHomeOpenTeamConfigPath } from "./config";
 import { runDoctor } from "./doctor";
 import { evaluatePolicies } from "./policy";
 import { findRegistryTeam, getCurrentTeamEntry, RegistryEntry } from "./team-registry";
 import { resolveManagementModel } from "./management-models";
+import { exportManifestPath } from "./project-files";
 
 export interface StatusSummary {
   team: RegistryEntry | null;
@@ -37,30 +38,9 @@ function latestFileInDir(dirPath: string, extension: string): string | null {
   return files[0]?.path ?? null;
 }
 
-function latestManifestInOut(baseOutDir = ".openteam"): string | null {
-  const base = path.resolve(baseOutDir);
-  if (!fs.existsSync(base)) {
-    return null;
-  }
-
-  const manifests: Array<{ path: string; mtime: number }> = [];
-  const stack = [base];
-  while (stack.length > 0) {
-    const current = stack.pop()!;
-    const entries = fs.readdirSync(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const full = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(full);
-        continue;
-      }
-      if (entry.isFile() && entry.name === "manifest.json" && full.includes(".openteam-export")) {
-        manifests.push({ path: full, mtime: fs.statSync(full).mtimeMs });
-      }
-    }
-  }
-  manifests.sort((a, b) => b.mtime - a.mtime);
-  return manifests[0]?.path ?? null;
+function latestManifestInProject(projectPath = "."): string | null {
+  const manifest = exportManifestPath(projectPath);
+  return fs.existsSync(manifest) ? manifest : null;
 }
 
 function resolveTeamEntry(teamNameOrSlug?: string): RegistryEntry | null {
@@ -91,12 +71,12 @@ export function getStatusSummary(options?: { team?: string; file?: string }): St
       policy: { pass: false, warnings: 0, failures: 1 },
       latest_run_file: null,
       latest_report_file: null,
-      latest_export_manifest: latestManifestInOut(".openteam")
+      latest_export_manifest: latestManifestInProject(".")
     };
   }
 
   const team = loadTeamConfig(teamFile);
-  const doctorChecks = runDoctor(teamFile, "openteam.yaml");
+  const doctorChecks = runDoctor(teamFile, resolveHomeOpenTeamConfigPath());
   const doctor = {
     ok: doctorChecks.filter((c) => c.status === "ok").length,
     warn: doctorChecks.filter((c) => c.status === "warn").length,
@@ -122,6 +102,6 @@ export function getStatusSummary(options?: { team?: string; file?: string }): St
     policy,
     latest_run_file: latestFileInDir(team.observability.store.runs_dir, ".json"),
     latest_report_file: latestFileInDir(team.observability.store.reports_dir, ".json"),
-    latest_export_manifest: latestManifestInOut(".openteam")
+    latest_export_manifest: latestManifestInProject(".")
   };
 }

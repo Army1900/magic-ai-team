@@ -107,7 +107,6 @@ export interface OpenTeamConfig {
   providers?: {
     openai?: {
       base_url?: string;
-      api_key?: string;
       api_key_env?: string;
       models?: {
         default?: string;
@@ -118,7 +117,6 @@ export interface OpenTeamConfig {
     };
     anthropic?: {
       base_url?: string;
-      api_key?: string;
       api_key_env?: string;
       models?: {
         default?: string;

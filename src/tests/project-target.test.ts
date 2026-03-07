@@ -31,7 +31,7 @@ run("readLastExportTarget returns null without manifest", () => {
 
 run("readLastExportTarget reads valid target from manifest", () => {
   withTempDir((dir) => {
-    const manifestDir = path.join(dir, ".openteam-export");
+    const manifestDir = path.join(dir, ".openteam", "exports");
     fs.mkdirSync(manifestDir, { recursive: true });
     fs.writeFileSync(path.join(manifestDir, "manifest.json"), JSON.stringify({ target: "codex" }), "utf8");
     assert.equal(readLastExportTarget(dir), "codex");
@@ -46,7 +46,7 @@ run("resolveProjectTarget prefers explicit target", () => {
 
 run("resolveProjectTarget falls back to manifest target", () => {
   withTempDir((dir) => {
-    const manifestDir = path.join(dir, ".openteam-export");
+    const manifestDir = path.join(dir, ".openteam", "exports");
     fs.mkdirSync(manifestDir, { recursive: true });
     fs.writeFileSync(path.join(manifestDir, "manifest.json"), JSON.stringify({ target: "aider" }), "utf8");
     assert.equal(resolveProjectTarget(dir), "aider");
@@ -55,10 +55,9 @@ run("resolveProjectTarget falls back to manifest target", () => {
 
 run("resolveProjectTarget falls back to default when manifest invalid", () => {
   withTempDir((dir) => {
-    const manifestDir = path.join(dir, ".openteam-export");
+    const manifestDir = path.join(dir, ".openteam", "exports");
     fs.mkdirSync(manifestDir, { recursive: true });
     fs.writeFileSync(path.join(manifestDir, "manifest.json"), JSON.stringify({ target: "invalid" }), "utf8");
     assert.equal(resolveProjectTarget(dir), "claude");
   });
 });
-

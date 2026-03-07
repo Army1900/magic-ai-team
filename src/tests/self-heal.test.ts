@@ -27,6 +27,6 @@ run("suggestFixes provides fallback doctor advice", () => {
 });
 
 run("suggestFixes returns launcher args-template advice", () => {
-  const fixes = suggestFixes("args run strategy requires launchers.continue.run.args_template in openteam.yaml");
+  const fixes = suggestFixes("args run strategy requires launchers.continue.run.args_template in <OPENTEAM_HOME>/openteam.yaml");
   assert.equal(fixes.some((f) => f.includes("args template")), true);
 });

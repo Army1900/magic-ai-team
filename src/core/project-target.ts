@@ -1,9 +1,9 @@
 import fs from "node:fs";
-import path from "node:path";
 import { ExportTarget, isExportTarget, normalizeExportTarget } from "./targets";
+import { exportManifestPath } from "./project-files";
 
 export function readLastExportTarget(projectPath: string): ExportTarget | null {
-  const manifest = path.resolve(projectPath, ".openteam-export", "manifest.json");
+  const manifest = exportManifestPath(projectPath);
   if (!fs.existsSync(manifest)) {
     return null;
   }
@@ -25,4 +25,3 @@ export function resolveProjectTarget(projectPath: string, target?: string, fallb
   const detected = readLastExportTarget(projectPath);
   return detected ?? fallback;
 }
-

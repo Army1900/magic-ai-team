@@ -22,14 +22,15 @@ interface ProviderRuntime {
   baseUrl: string;
   apiKey?: string;
   apiKeyEnvName: string;
-  apiKeySource: "inline" | "env" | "missing";
+  apiKeySource: "env" | "missing" | "inline_blocked";
+  securityError?: string;
 }
 
 export interface ProviderRuntimeInfo {
   provider: SupportedProvider;
   base_url: string;
   api_key_env: string;
-  api_key_source: "inline" | "env" | "missing";
+  api_key_source: "env" | "missing" | "inline_blocked";
   api_key_configured: boolean;
 }
 
@@ -73,22 +74,29 @@ function loadRuntimeConfig(provider: SupportedProvider): ProviderRuntime {
       ? process.env.OPENAI_API_KEY
       : process.env.ANTHROPIC_API_KEY;
 
-  let cfgProvider: { base_url?: string; api_key?: string; api_key_env?: string } | undefined;
+  let cfgProvider: { base_url?: string; api_key_env?: string } & Record<string, unknown> | undefined;
   try {
-    const cfg = loadOpenTeamConfig("openteam.yaml");
+    const cfg = loadOpenTeamConfig();
     cfgProvider =
       provider === "openai"
         ? cfg.providers?.openai
         : cfg.providers?.anthropic;
   } catch {
-    // ignore missing/invalid openteam.yaml and fallback to defaults
+    // ignore missing/invalid OpenTeam config and fallback to defaults
   }
 
   const apiKeyEnvName = cfgProvider?.api_key_env?.trim() || defaultApiKeyEnv(provider);
   const envByName = process.env[apiKeyEnvName];
-  const apiKey = cfgProvider?.api_key?.trim() || envByName || envKeyDirect;
-  const apiKeySource = cfgProvider?.api_key?.trim()
-    ? "inline"
+  const inlineApiKey =
+    typeof cfgProvider?.api_key === "string" && cfgProvider.api_key.trim().length > 0
+      ? cfgProvider.api_key.trim()
+      : "";
+  const securityError = inlineApiKey
+    ? `providers.${provider}.api_key is not allowed. Use ${apiKeyEnvName} (or providers.${provider}.api_key_env).`
+    : undefined;
+  const apiKey = securityError ? undefined : envByName || envKeyDirect;
+  const apiKeySource = securityError
+    ? "inline_blocked"
     : apiKey
       ? "env"
       : "missing";
@@ -101,7 +109,8 @@ function loadRuntimeConfig(provider: SupportedProvider): ProviderRuntime {
     baseUrl,
     apiKey,
     apiKeyEnvName,
-    apiKeySource
+    apiKeySource,
+    securityError
   };
 }
 
@@ -135,28 +144,39 @@ export async function testProviderConnectivity(
       provider,
       endpoint: provider === "openai" ? `${runtime.baseUrl}/models` : anthropicModelsUrl(runtime.baseUrl),
       ok: false,
-      detail: `${runtime.apiKeyEnvName} missing (or set providers.${provider}.api_key)`
+      detail: runtime.securityError ?? `${runtime.apiKeyEnvName} missing`
     };
   }
 
-  const endpoint = provider === "openai" ? `${runtime.baseUrl}/models` : anthropicModelsUrl(runtime.baseUrl);
+  const endpoint = provider === "openai" ? `${runtime.baseUrl}/models` : anthropicMessagesUrl(runtime.baseUrl);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), Math.max(1000, timeoutMs));
   try {
-    const headers: Record<string, string> =
+    const openaiHeaders: Record<string, string> = {
+      Authorization: `Bearer ${runtime.apiKey}`
+    };
+    const anthropicHeaders: Record<string, string> = {
+      "x-api-key": runtime.apiKey,
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json"
+    };
+    const res =
       provider === "openai"
-        ? {
-            Authorization: `Bearer ${runtime.apiKey}`
-          }
-        : {
-            "x-api-key": runtime.apiKey,
-            "anthropic-version": "2023-06-01"
-          };
-    const res = await fetch(endpoint, {
-      method: "GET",
-      headers,
-      signal: controller.signal
-    });
+        ? await fetch(endpoint, {
+            method: "GET",
+            headers: openaiHeaders,
+            signal: controller.signal
+          })
+        : await fetch(endpoint, {
+            method: "POST",
+            headers: anthropicHeaders,
+            signal: controller.signal,
+            body: JSON.stringify({
+              model: "claude-sonnet-4",
+              max_tokens: 1,
+              messages: [{ role: "user", content: "ping" }]
+            })
+          });
     const body = (await res.text()).slice(0, 180).replace(/\s+/g, " ").trim();
     if (res.ok) {
       return {
@@ -165,6 +185,34 @@ export async function testProviderConnectivity(
         ok: true,
         status_code: res.status,
         detail: `HTTP ${res.status}`
+      };
+    }
+    if (provider === "anthropic" && (res.status === 404 || res.status === 405)) {
+      const modelEndpoint = anthropicModelsUrl(runtime.baseUrl);
+      const modelRes = await fetch(modelEndpoint, {
+        method: "GET",
+        headers: {
+          "x-api-key": runtime.apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        signal: controller.signal
+      });
+      const modelBody = (await modelRes.text()).slice(0, 180).replace(/\s+/g, " ").trim();
+      if (modelRes.ok) {
+        return {
+          provider,
+          endpoint: modelEndpoint,
+          ok: true,
+          status_code: modelRes.status,
+          detail: `HTTP ${modelRes.status}`
+        };
+      }
+      return {
+        provider,
+        endpoint: modelEndpoint,
+        ok: false,
+        status_code: modelRes.status,
+        detail: `HTTP ${modelRes.status}${modelBody ? `: ${modelBody}` : ""}`
       };
     }
     const authHint =
@@ -212,16 +260,13 @@ export function describeProviderAuth(model: string): { provider: string; ok: boo
     return {
       provider,
       ok: false,
-      detail: `${runtime.apiKeyEnvName} missing (or set providers.${provider}.api_key in openteam.yaml)`
+      detail: runtime.securityError ?? `${runtime.apiKeyEnvName} missing`
     };
   }
   return {
     provider,
     ok: true,
-    detail:
-      runtime.apiKeySource === "inline"
-        ? `providers.${provider}.api_key configured`
-        : `${runtime.apiKeyEnvName} present`
+    detail: `${runtime.apiKeyEnvName} present`
   };
 }
 
@@ -248,7 +293,7 @@ async function openAiInvoke(input: ModelInvokeInput): Promise<ModelInvokeOutput>
   const runtime = loadRuntimeConfig("openai");
   const apiKey = runtime.apiKey;
   if (!apiKey) {
-    throw new Error(`${runtime.apiKeyEnvName} is missing (and providers.openai.api_key is not set)`);
+    throw new Error(runtime.securityError ?? `${runtime.apiKeyEnvName} is missing`);
   }
 
   const modelName = input.model.split(":")[1] ?? input.model;
@@ -289,7 +334,7 @@ async function anthropicInvoke(input: ModelInvokeInput): Promise<ModelInvokeOutp
   const runtime = loadRuntimeConfig("anthropic");
   const apiKey = runtime.apiKey;
   if (!apiKey) {
-    throw new Error(`${runtime.apiKeyEnvName} is missing (and providers.anthropic.api_key is not set)`);
+    throw new Error(runtime.securityError ?? `${runtime.apiKeyEnvName} is missing`);
   }
 
   const modelName = input.model.split(":")[1] ?? input.model;

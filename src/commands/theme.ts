@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import { resolveHomeOpenTeamConfigPath } from "../core/config";
 import { loadOrCreateOpenTeamConfig, saveOpenTeamConfig } from "../core/marketplace";
 import { error, info, listThemes, resolveTheme, success } from "../core/ui";
 
@@ -17,9 +18,9 @@ export function registerThemeCommand(program: Command): void {
 
   cmd
     .command("set")
-    .description("Set default theme in openteam.yaml")
+    .description("Set default theme in OpenTeam config")
     .requiredOption("--name <theme>", "theme name")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .action((options) => {
       const normalized = resolveTheme(options.name);
       if (normalized !== options.name.toLowerCase()) {

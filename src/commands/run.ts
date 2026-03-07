@@ -78,6 +78,25 @@ export function registerRunCommand(program: Command): void {
             team_file: teamFile
           }
         });
+        for (const step of artifact.steps) {
+          appendWorklogEvent(projectPath, {
+            type: "run_step",
+            team: team.team.name,
+            agent: step.agent_id,
+            task: options.task,
+            status: step.status,
+            latency_ms: step.latency_ms,
+            cost_usd: step.estimated_cost_usd,
+            tokens: step.estimated_tokens,
+            note: `model=${step.model}`,
+            meta: {
+              run_id: artifact.run_id,
+              model: step.model,
+              execution_mode: mode,
+              team_file: teamFile
+            }
+          });
+        }
 
         if (options.json) {
           console.log(

@@ -1,5 +1,6 @@
 import { Command } from "commander";
 import { resolveTeamFileOrThrow } from "../core/current-team";
+import { resolveHomeOpenTeamConfigPath } from "../core/config";
 import { runDoctor } from "../core/doctor";
 import { banner, error, info, status } from "../core/ui";
 
@@ -9,7 +10,7 @@ export function registerDoctorCommand(program: Command): void {
     .description("Run health checks for openteam environment")
     .option("-f, --file <path>", "team config path (overrides --team/current)")
     .option("--team <nameOrSlug>", "team from registry (default: current team)")
-    .option("-c, --config <path>", "openteam config path", "openteam.yaml")
+    .option("-c, --config <path>", "openteam config path", resolveHomeOpenTeamConfigPath())
     .option("--target <target>", "optional target diagnostics (launcher + compatibility)")
     .action((options) => {
       try {

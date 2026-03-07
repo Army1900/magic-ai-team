@@ -4,7 +4,7 @@ import readline from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { Command } from "commander";
 import { defaultTeamTemplate } from "../core/templates";
-import { ensureDir, fileExists, writeYamlFile } from "../core/config";
+import { ensureDir, fileExists, resolveHomeOpenTeamConfigPath, writeYamlFile } from "../core/config";
 import { banner, error, info, success } from "../core/ui";
 
 function ensureDefaultContextDocs(): void {
@@ -71,7 +71,7 @@ export function registerInitCommand(program: Command): void {
       ensureDir(path.dirname(outPath));
       writeYamlFile(outPath, team);
 
-      const openTeamPath = path.resolve("openteam.yaml");
+      const openTeamPath = resolveHomeOpenTeamConfigPath();
       if (!fs.existsSync(openTeamPath)) {
         const defaultOpenTeam = {
           version: "1.0",
@@ -89,6 +89,7 @@ export function registerInitCommand(program: Command): void {
             min_trust_score: 0.7
           }
         };
+        ensureDir(path.dirname(openTeamPath));
         writeYamlFile(openTeamPath, defaultOpenTeam);
       }
 
@@ -100,7 +101,7 @@ export function registerInitCommand(program: Command): void {
 
       banner("Initialized", "OpenTeam project scaffolding");
       success(`Team config: ${outPath}`);
-      info("Generated helper config: openteam.yaml");
+      info(`Generated helper config: ${openTeamPath}`);
       info("Next steps:");
       info("  1) openteam validate");
       info("  2) openteam doctor");

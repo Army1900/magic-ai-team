@@ -4,6 +4,7 @@ import { ensureDir, writeYamlFile } from "./config";
 import { TeamConfig } from "./types";
 import { appendWorklogEvent, ensureProjectWorklog } from "./worklog";
 import { ExportTarget } from "./targets";
+import { exportManifestDir, exportManifestPath } from "./project-files";
 
 export interface ExportResult {
   target: ExportTarget;
@@ -35,6 +36,53 @@ interface McpAdapterRecord {
   auth?: string;
   permissions: string[];
   risk_level?: string;
+}
+
+function formalAgents(team: TeamConfig): Array<Record<string, unknown>> {
+  return team.execution_plane.agents.map((a) => ({
+    id: a.id,
+    role: a.role,
+    model: a.model.primary,
+    fallback_models: a.model.fallback ?? [],
+    skills: a.skills,
+    mcps: a.mcps,
+    contracts: {
+      input: a.input_contract,
+      output: a.output_contract
+    }
+  }));
+}
+
+function formalSkills(team: TeamConfig): { skills: TeamConfig["resources"]["skills"]; mcps: TeamConfig["resources"]["mcps"] } {
+  return {
+    skills: team.resources.skills,
+    mcps: team.resources.mcps
+  };
+}
+
+function writeFormalBundle(targetDir: string, team: TeamConfig, files: string[]): void {
+  files.push(
+    writeJson(path.join(targetDir, "agents.json"), {
+      generated_by: "openteam",
+      schema: "openteam.agents.v1",
+      team: team.team.name,
+      agents: formalAgents(team)
+    })
+  );
+  files.push(
+    writeJson(path.join(targetDir, "skills.json"), {
+      generated_by: "openteam",
+      schema: "openteam.skills.v1",
+      ...formalSkills(team)
+    })
+  );
+  files.push(
+    writeJson(path.join(targetDir, "mcp.json"), {
+      generated_by: "openteam",
+      schema: "openteam.mcp.v1",
+      mcps: toMcpAdapterRecords(team)
+    })
+  );
 }
 
 function writeJson(filePath: string, data: unknown): string {
@@ -75,38 +123,25 @@ function exportOpencode(ctx: ExportContext): ExportResult {
   ensureDir(targetDir);
   const files: string[] = [];
   const warnings = commonWarnings(ctx.team);
+  const agents = formalAgents(ctx.team);
 
   files.push(
     writeJson(path.join(targetDir, "team.json"), {
       name: ctx.team.team.name,
       goal: ctx.team.team.goal,
       managers: ctx.team.control_plane.manager_agents,
-      agents: ctx.team.execution_plane.agents.map((a) => ({
-        id: a.id,
-        role: a.role,
-        model: a.model.primary,
-        fallback_models: a.model.fallback ?? [],
-        skills: a.skills,
-        mcps: a.mcps
-      })),
-      skills: ctx.team.resources.skills,
-      mcps: ctx.team.resources.mcps,
+      agents,
+      skills: formalSkills(ctx.team).skills,
+      mcps: formalSkills(ctx.team).mcps,
       policies: ctx.team.policies
     })
   );
+  writeFormalBundle(targetDir, ctx.team, files);
 
   files.push(
     writeJson(path.join(targetDir, "README.opencode.json"), {
       generated_by: "openteam",
-      note: "Import team.json into your OpenCode project settings."
-    })
-  );
-
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for opencode target",
-      mcps: toMcpAdapterRecords(ctx.team)
+      note: "Import team.json, agents.json, and skills.json into your OpenCode project settings."
     })
   );
 
@@ -155,6 +190,7 @@ function exportOpenclaw(ctx: ExportContext): ExportResult {
     mcps: toMcpAdapterRecords(ctx.team)
   });
   files.push(path.resolve(mcpYaml));
+  writeFormalBundle(targetDir, ctx.team, files);
 
   return {
     target: "openclaw",
@@ -196,13 +232,7 @@ function exportClaude(ctx: ExportContext): ExportResult {
     })
   );
 
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for claude target",
-      mcps: toMcpAdapterRecords(ctx.team)
-    })
-  );
+  writeFormalBundle(targetDir, ctx.team, files);
 
   return {
     target: "claude",
@@ -251,13 +281,7 @@ function exportCodex(ctx: ExportContext): ExportResult {
     })
   );
 
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for codex target",
-      mcps: toMcpAdapterRecords(ctx.team)
-    })
-  );
+  writeFormalBundle(targetDir, ctx.team, files);
 
   return {
     target: "codex",
@@ -287,13 +311,7 @@ function exportAider(ctx: ExportContext): ExportResult {
       policies: ctx.team.policies
     })
   );
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for aider target",
-      mcps: toMcpAdapterRecords(ctx.team)
-    })
-  );
+  writeFormalBundle(targetDir, ctx.team, files);
   return {
     target: "aider",
     output_dir: targetDir,
@@ -320,13 +338,7 @@ function exportContinue(ctx: ExportContext): ExportResult {
     context_docs: ctx.team.context_docs ?? []
   });
   files.push(path.resolve(configPath));
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for continue target",
-      mcps: toMcpAdapterRecords(ctx.team)
-    })
-  );
+  writeFormalBundle(targetDir, ctx.team, files);
   return {
     target: "continue",
     output_dir: targetDir,
@@ -353,13 +365,7 @@ function exportCline(ctx: ExportContext): ExportResult {
       }))
     })
   );
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for cline target",
-      mcps: toMcpAdapterRecords(ctx.team)
-    })
-  );
+  writeFormalBundle(targetDir, ctx.team, files);
   return {
     target: "cline",
     output_dir: targetDir,
@@ -388,13 +394,7 @@ function exportOpenhands(ctx: ExportContext): ExportResult {
       policies: ctx.team.policies
     })
   );
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for openhands target",
-      mcps: toMcpAdapterRecords(ctx.team)
-    })
-  );
+  writeFormalBundle(targetDir, ctx.team, files);
   return {
     target: "openhands",
     output_dir: targetDir,
@@ -421,13 +421,7 @@ function exportTabby(ctx: ExportContext): ExportResult {
       context_docs: ctx.team.context_docs ?? []
     })
   );
-  files.push(
-    writeJson(path.join(targetDir, "mcp.json"), {
-      generated_by: "openteam",
-      note: "MCP adapter config for tabby target",
-      mcps: toMcpAdapterRecords(ctx.team)
-    })
-  );
+  writeFormalBundle(targetDir, ctx.team, files);
   return {
     target: "tabby",
     output_dir: targetDir,
@@ -451,12 +445,19 @@ export function validateExportResult(result: ExportResult): TargetValidationResu
     return { target: result.target, findings };
   }
 
+  if (!hasFile(result.files, `/.${result.target}/agents.json`)) {
+    findings.push({ severity: "fail", code: "TARGET_AGENTS_MISSING", message: `missing .${result.target}/agents.json` });
+  }
+  if (!hasFile(result.files, `/.${result.target}/skills.json`)) {
+    findings.push({ severity: "fail", code: "TARGET_SKILLS_MISSING", message: `missing .${result.target}/skills.json` });
+  }
+  if (!hasFile(result.files, `/.${result.target}/mcp.json`)) {
+    findings.push({ severity: "fail", code: "TARGET_MCP_CONFIG_MISSING", message: `missing .${result.target}/mcp.json` });
+  }
+
   if (result.target === "opencode") {
     if (!hasFile(result.files, "/.opencode/team.json")) {
       findings.push({ severity: "fail", code: "OPENCODE_TEAM_JSON_MISSING", message: "missing .opencode/team.json" });
-    }
-    if (!hasFile(result.files, "/.opencode/mcp.json")) {
-      findings.push({ severity: "warn", code: "OPENCODE_MCP_CONFIG_MISSING", message: "missing .opencode/mcp.json" });
     }
   }
   if (result.target === "openclaw") {
@@ -468,68 +469,35 @@ export function validateExportResult(result: ExportResult): TargetValidationResu
     }
   }
   if (result.target === "claude") {
-    if (!hasFile(result.files, "/.claude/agents.json")) {
-      findings.push({ severity: "fail", code: "CLAUDE_AGENTS_MISSING", message: "missing .claude/agents.json" });
-    }
     if (!hasFile(result.files, "/.claude/skills.json")) {
       findings.push({ severity: "fail", code: "CLAUDE_SKILLS_MISSING", message: "missing .claude/skills.json" });
     }
-    if (!hasFile(result.files, "/.claude/mcp.json")) {
-      findings.push({ severity: "warn", code: "CLAUDE_MCP_CONFIG_MISSING", message: "missing .claude/mcp.json" });
-    }
   }
   if (result.target === "codex") {
-    if (!hasFile(result.files, "/.codex/agents.json")) {
-      findings.push({ severity: "fail", code: "CODEX_AGENTS_MISSING", message: "missing .codex/agents.json" });
-    }
-    if (!hasFile(result.files, "/.codex/skills.json")) {
-      findings.push({ severity: "fail", code: "CODEX_SKILLS_MISSING", message: "missing .codex/skills.json" });
-    }
     if (!hasFile(result.files, "/.codex/codex.team.json")) {
       findings.push({ severity: "warn", code: "CODEX_TEAM_META_MISSING", message: "missing .codex/codex.team.json" });
-    }
-    if (!hasFile(result.files, "/.codex/mcp.json")) {
-      findings.push({ severity: "warn", code: "CODEX_MCP_CONFIG_MISSING", message: "missing .codex/mcp.json" });
     }
   }
   if (result.target === "aider") {
     if (!hasFile(result.files, "/.aider/aider.team.json")) {
       findings.push({ severity: "fail", code: "AIDER_TEAM_CONFIG_MISSING", message: "missing .aider/aider.team.json" });
     }
-    if (!hasFile(result.files, "/.aider/mcp.json")) {
-      findings.push({ severity: "warn", code: "AIDER_MCP_CONFIG_MISSING", message: "missing .aider/mcp.json" });
-    }
   }
   if (result.target === "continue") {
     if (!hasFile(result.files, "/.continue/config.yaml")) {
       findings.push({ severity: "fail", code: "CONTINUE_CONFIG_MISSING", message: "missing .continue/config.yaml" });
     }
-    if (!hasFile(result.files, "/.continue/mcp.json")) {
-      findings.push({ severity: "warn", code: "CONTINUE_MCP_CONFIG_MISSING", message: "missing .continue/mcp.json" });
-    }
   }
   if (result.target === "cline") {
-    if (!hasFile(result.files, "/.cline/agents.json")) {
-      findings.push({ severity: "fail", code: "CLINE_AGENTS_MISSING", message: "missing .cline/agents.json" });
-    }
-    if (!hasFile(result.files, "/.cline/mcp.json")) {
-      findings.push({ severity: "warn", code: "CLINE_MCP_CONFIG_MISSING", message: "missing .cline/mcp.json" });
-    }
   }
   if (result.target === "openhands") {
     if (!hasFile(result.files, "/.openhands/workflow.json")) {
       findings.push({ severity: "fail", code: "OPENHANDS_WORKFLOW_MISSING", message: "missing .openhands/workflow.json" });
     }
-    if (!hasFile(result.files, "/.openhands/mcp.json")) {
-      findings.push({ severity: "warn", code: "OPENHANDS_MCP_CONFIG_MISSING", message: "missing .openhands/mcp.json" });
-    }
   }
   if (result.target === "tabby") {
     if (!hasFile(result.files, "/.tabby/tabby.team.json")) {
       findings.push({ severity: "fail", code: "TABBY_TEAM_CONFIG_MISSING", message: "missing .tabby/tabby.team.json" });
-    }
-    if (!hasFile(result.files, "/.tabby/mcp.json")) {
-      findings.push({ severity: "warn", code: "TABBY_MCP_CONFIG_MISSING", message: "missing .tabby/mcp.json" });
     }
   }
 
@@ -573,9 +541,9 @@ export function exportTeam(team: TeamConfig, target: ExportTarget, outDir: strin
 }
 
 export function writeExportManifest(baseOutDir: string, result: ExportResult, teamFile: string): string {
-  const manifestDir = path.resolve(baseOutDir, ".openteam-export");
+  const manifestDir = exportManifestDir(baseOutDir);
   ensureDir(manifestDir);
-  const manifestPath = path.join(manifestDir, "manifest.json");
+  const manifestPath = exportManifestPath(baseOutDir);
   const payload = {
     exported_at: new Date().toISOString(),
     target: result.target,

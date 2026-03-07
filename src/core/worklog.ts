@@ -29,6 +29,21 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return value;
+}
+
+export function normalizeWorklogEvent(event: Omit<WorklogEvent, "ts"> & { ts?: string }): WorklogEvent {
+  return {
+    ...event,
+    ts: event.ts ?? nowIso(),
+    latency_ms: toFiniteNumber(event.latency_ms),
+    cost_usd: toFiniteNumber(event.cost_usd),
+    tokens: toFiniteNumber(event.tokens)
+  };
+}
+
 function dayKey(ts: string): string {
   return ts.slice(0, 10);
 }
@@ -100,6 +115,9 @@ function appendDaily(paths: WorklogPaths, event: WorklogEvent): void {
     (event.status ? ` | status=${event.status}` : "") +
     (event.team ? ` | team=${event.team}` : "") +
     (event.task ? ` | task=${event.task}` : "") +
+    (typeof event.tokens === "number" ? ` | tokens=${event.tokens}` : "") +
+    (typeof event.cost_usd === "number" ? ` | cost_usd=${event.cost_usd}` : "") +
+    (typeof event.latency_ms === "number" ? ` | latency_ms=${event.latency_ms}` : "") +
     (event.note ? ` | note=${event.note}` : "") +
     `\n`;
   fs.appendFileSync(dayFile, line, "utf8");
@@ -107,10 +125,7 @@ function appendDaily(paths: WorklogPaths, event: WorklogEvent): void {
 
 export function appendWorklogEvent(projectPath: string, event: Omit<WorklogEvent, "ts"> & { ts?: string }): WorklogEvent {
   const paths = ensureProjectWorklog(projectPath, { team: event.team });
-  const normalized: WorklogEvent = {
-    ...event,
-    ts: event.ts ?? nowIso()
-  };
+  const normalized = normalizeWorklogEvent(event);
   fs.appendFileSync(paths.events, `${JSON.stringify(normalized)}\n`, "utf8");
   appendDaily(paths, normalized);
   updateSummary(paths, normalized);

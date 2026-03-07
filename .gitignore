@@ -5,3 +5,13 @@ dist/
 .openteam/runs/
 .openteam/reports/
 .openteam/versions/
+.openteam/exports/
+.monitor-demo/
+.codex-export-demo/
+.quickstart-out/
+.quickstart-out2/
+.quickstart-out3/
+.mcp-check-*/
+.target-*/
+.claude/
+.continue/

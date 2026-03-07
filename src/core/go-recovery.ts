@@ -46,9 +46,41 @@ export function loadGoRecovery(): GoRecoveryState | null {
   }
 }
 
+export async function loadGoRecoveryAsync(): Promise<GoRecoveryState | null> {
+  const p = recoveryPath();
+  try {
+    await fs.promises.access(p);
+  } catch {
+    return null;
+  }
+  try {
+    const raw = await fs.promises.readFile(p, "utf8");
+    return JSON.parse(raw) as GoRecoveryState;
+  } catch {
+    return null;
+  }
+}
+
 export function saveGoRecovery(state: GoRecoveryState): string {
   const p = recoveryPath();
   fs.writeFileSync(
+    p,
+    JSON.stringify(
+      {
+        ...state,
+        updated_at: nowIso()
+      },
+      null,
+      2
+    ),
+    "utf8"
+  );
+  return p;
+}
+
+export async function saveGoRecoveryAsync(state: GoRecoveryState): Promise<string> {
+  const p = recoveryPath();
+  await fs.promises.writeFile(
     p,
     JSON.stringify(
       {

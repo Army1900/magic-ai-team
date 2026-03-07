@@ -42,6 +42,7 @@ async function runTargetFlow(root: string, target: (typeof EXPORT_TARGETS)[numbe
       name: `E2E-${target}`,
       goal: "Automate support triage",
       target,
+      allowMock: true,
       nonInteractive: true,
       strict: false,
       silent: true

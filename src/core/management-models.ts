@@ -19,7 +19,7 @@ export function resolveManagementModel(role: ManagementRole, cliOverride?: strin
   }
 
   try {
-    const cfg = loadOpenTeamConfig("openteam.yaml");
+    const cfg = loadOpenTeamConfig();
     const currentProvider = (cfg.current_provider || "openai").toLowerCase();
     const providerCfg =
       currentProvider === "anthropic"

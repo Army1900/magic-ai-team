@@ -7,6 +7,8 @@ import { readProgressTemplate, renderProgressReport } from "../core/progress-tem
 import { ensureDir } from "../core/config";
 import { loadTeamConfig } from "../core/config";
 import { TeamConfig } from "../core/types";
+import { exportManifestPath } from "../core/project-files";
+import { summarizeBilling } from "../core/billing";
 
 function resolveProject(input?: string): string {
   return path.resolve(input ?? process.cwd());
@@ -28,6 +30,36 @@ function toBulletList(items: string[], emptyFallback: string): string {
 
 function compactStatusSummary(input: { ok: number; warn: number; fail: number; cost_usd: number; latency_ms: number }): string {
   return `ok=${input.ok}, warn=${input.warn}, fail=${input.fail}, cost_usd=${input.cost_usd}, latency_ms=${input.latency_ms}`;
+}
+
+function budgetAlert(
+  team: TeamConfig | null,
+  usage: { run_count: number; avg_run_cost_usd: number; max_run_cost_usd: number; cost_usd: number },
+  sinceLabel: string
+): { level: "ok" | "warn" | "fail"; text: string } {
+  if (!team) {
+    return { level: "warn", text: "budget baseline unavailable (no team manifest)" };
+  }
+  const budget = team.policies.budget.max_cost_usd_per_run;
+  if (usage.run_count === 0) {
+    return { level: "ok", text: `no run found in window=${sinceLabel}` };
+  }
+  if (usage.max_run_cost_usd > budget) {
+    return {
+      level: "fail",
+      text: `max run cost ${usage.max_run_cost_usd.toFixed(4)} exceeds per-run budget ${budget.toFixed(4)} (window=${sinceLabel})`
+    };
+  }
+  if (usage.avg_run_cost_usd > budget * 0.8) {
+    return {
+      level: "warn",
+      text: `avg run cost ${usage.avg_run_cost_usd.toFixed(4)} is above 80% of per-run budget ${budget.toFixed(4)} (window=${sinceLabel})`
+    };
+  }
+  return {
+    level: "ok",
+    text: `avg/max run cost ${usage.avg_run_cost_usd.toFixed(4)}/${usage.max_run_cost_usd.toFixed(4)} within budget ${budget.toFixed(4)} (window=${sinceLabel})`
+  };
 }
 
 function defaultReportPath(project: string): string {
@@ -55,7 +87,7 @@ function toRiskLevel(team: TeamConfig | null, events: WorklogEvent[]): string {
 }
 
 function loadTeamFromProjectManifest(project: string): TeamConfig | null {
-  const manifest = path.resolve(project, ".openteam-export", "manifest.json");
+  const manifest = exportManifestPath(project);
   if (!fs.existsSync(manifest)) {
     return null;
   }
@@ -117,6 +149,7 @@ export function registerMonitorCommand(program: Command): void {
       for (const e of events) {
         byType[e.type] = (byType[e.type] ?? 0) + 1;
       }
+      const usage = summarizeBilling(events);
 
       const payload = {
         project,
@@ -124,7 +157,8 @@ export function registerMonitorCommand(program: Command): void {
         total_events: events.length,
         last_event: last,
         status_counts: { ok, warn, fail },
-        type_counts: byType
+        type_counts: byType,
+        usage
       };
       if (options.json) {
         console.log(JSON.stringify(payload, null, 2));
@@ -142,6 +176,11 @@ export function registerMonitorCommand(program: Command): void {
       kv("ok", ok);
       kv("warn", warn);
       kv("fail", fail);
+      kv("tokens", usage.tokens);
+      kv("cost_usd", usage.cost_usd);
+      for (const row of usage.byAgent.slice(0, 5)) {
+        info(`- usage ${row.agent}: tokens=${row.tokens}, cost_usd=${row.cost_usd}`);
+      }
       for (const [k, v] of Object.entries(byType)) {
         info(`- ${k}: ${v}`);
       }
@@ -194,24 +233,29 @@ export function registerMonitorCommand(program: Command): void {
       const all = readWorklogEvents(project);
       const threshold = Date.now() - span;
       const events = all.filter((e) => Date.parse(e.ts) >= threshold);
+      const usage = summarizeBilling(events);
       const totals = {
         ok: events.filter((e) => e.status === "ok").length,
         warn: events.filter((e) => e.status === "warn").length,
         fail: events.filter((e) => e.status === "fail").length,
-        cost_usd: Number(events.reduce((s, e) => s + (e.cost_usd ?? 0), 0).toFixed(4)),
-        latency_ms: events.reduce((s, e) => s + (e.latency_ms ?? 0), 0)
+        cost_usd: usage.cost_usd,
+        latency_ms: usage.latency_ms
       };
       const types: Record<string, number> = {};
       for (const e of events) {
         types[e.type] = (types[e.type] ?? 0) + 1;
       }
 
+      const teamConfig = loadTeamFromProjectManifest(project);
+      const alert = budgetAlert(teamConfig, usage, String(options.since));
       const payload = {
         project,
         since: options.since,
         total_events: events.length,
         totals,
-        type_counts: types
+        type_counts: types,
+        usage,
+        budget_alert: alert
       };
 
       if (options.json) {
@@ -257,7 +301,6 @@ export function registerMonitorCommand(program: Command): void {
               Object.entries(types).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "n/a"
             }.`;
       const statusSummary = compactStatusSummary(totals);
-      const teamConfig = loadTeamFromProjectManifest(project);
       const kpiSummary = teamConfig
         ? toBulletList(
             teamConfig.team.kpis.map((k) => `${k.name}: ${k.target}`),
@@ -321,7 +364,12 @@ export function registerMonitorCommand(program: Command): void {
       kv("warn", totals.warn);
       kv("fail", totals.fail);
       kv("cost_usd", totals.cost_usd);
+      kv("tokens", usage.tokens);
       kv("latency_ms", totals.latency_ms);
+      status(alert.level, "budget", alert.text);
+      for (const row of usage.byAgent.slice(0, 8)) {
+        info(`- usage ${row.agent}: tokens=${row.tokens}, cost_usd=${row.cost_usd}`);
+      }
       for (const [k, v] of Object.entries(types)) {
         info(`- ${k}: ${v}`);
       }

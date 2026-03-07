@@ -1,4 +1,4 @@
-import { spawnSync, SpawnSyncReturns } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { loadOpenTeamConfig } from "./config";
 import { EXPORT_TARGETS, ExportTarget, getDefaultToolCommand } from "./targets";
 
@@ -39,6 +39,12 @@ export interface RunExecutionPlan {
   manual_hint?: string;
 }
 
+export interface LaunchExecutionResult {
+  status: number | null;
+  signal: NodeJS.Signals | null;
+  error?: Error;
+}
+
 const ADAPTERS: Record<ExportTarget, LaunchAdapter> = {
   opencode: { target: "opencode", command: "opencode", supports_stdin_run: true, run_strategy: "stdin" },
   openclaw: { target: "openclaw", command: "openclaw", supports_stdin_run: true, run_strategy: "stdin" },
@@ -50,34 +56,34 @@ const ADAPTERS: Record<ExportTarget, LaunchAdapter> = {
     command: "continue",
     supports_stdin_run: false,
     run_strategy: "manual",
-    manual_hint: "Configure launchers.continue.run args_template in openteam.yaml to enable --run."
+    manual_hint: "Configure launchers.continue.run args_template in <OPENTEAM_HOME>/openteam.yaml to enable --run."
   },
   cline: {
     target: "cline",
     command: "cline",
     supports_stdin_run: false,
     run_strategy: "manual",
-    manual_hint: "Configure launchers.cline.run args_template in openteam.yaml to enable --run."
+    manual_hint: "Configure launchers.cline.run args_template in <OPENTEAM_HOME>/openteam.yaml to enable --run."
   },
   openhands: {
     target: "openhands",
     command: "openhands",
     supports_stdin_run: false,
     run_strategy: "manual",
-    manual_hint: "Configure launchers.openhands.run args_template in openteam.yaml to enable --run."
+    manual_hint: "Configure launchers.openhands.run args_template in <OPENTEAM_HOME>/openteam.yaml to enable --run."
   },
   tabby: {
     target: "tabby",
     command: "tabby",
     supports_stdin_run: false,
     run_strategy: "manual",
-    manual_hint: "Configure launchers.tabby.run args_template in openteam.yaml to enable --run."
+    manual_hint: "Configure launchers.tabby.run args_template in <OPENTEAM_HOME>/openteam.yaml to enable --run."
   }
 };
 
 function getLauncherRunOverride(target: ExportTarget): LauncherRunOverride | null {
   try {
-    const cfg = loadOpenTeamConfig("openteam.yaml");
+    const cfg = loadOpenTeamConfig();
     const launchers = cfg.launchers as Record<string, { run?: LauncherRunOverride }> | undefined;
     return launchers?.[target]?.run ?? null;
   } catch {
@@ -120,23 +126,34 @@ export function commandExists(command: string): boolean {
   return result.status === 0;
 }
 
+function spawnAsync(
+  command: string,
+  args: string[],
+  options: { cwd: string; runMode: boolean; prompt: string }
+): Promise<LaunchExecutionResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      stdio: options.runMode ? ["pipe", "inherit", "inherit"] : "inherit"
+    });
+    if (options.runMode && child.stdin) {
+      child.stdin.write(`${options.prompt}\n`);
+      child.stdin.end();
+    }
+    child.on("error", (error) => {
+      resolve({ status: null, signal: null, error });
+    });
+    child.on("close", (status, signal) => {
+      resolve({ status, signal });
+    });
+  });
+}
+
 export function launchTool(
   tool: ToolSpec,
   options: { cwd: string; runMode: boolean; prompt: string }
-): SpawnSyncReturns<string> {
-  if (options.runMode) {
-    return spawnSync(tool.command, tool.args, {
-      cwd: options.cwd,
-      stdio: ["pipe", "inherit", "inherit"],
-      input: `${options.prompt}\n`,
-      encoding: "utf8"
-    });
-  }
-  return spawnSync(tool.command, tool.args, {
-    cwd: options.cwd,
-    stdio: "inherit",
-    encoding: "utf8"
-  });
+): Promise<LaunchExecutionResult> {
+  return spawnAsync(tool.command, tool.args, options);
 }
 
 export function resolveRunExecutionPlan(input: {
@@ -169,7 +186,7 @@ export function resolveRunExecutionPlan(input: {
         command: input.tool.command,
         args: input.tool.args,
         prompt: input.prompt,
-        reason: `Target '${input.target}' args run strategy requires launchers.${input.target}.run.args_template in openteam.yaml.`
+        reason: `Target '${input.target}' args run strategy requires launchers.${input.target}.run.args_template in <OPENTEAM_HOME>/openteam.yaml.`
       };
     }
     const values = {
@@ -198,22 +215,14 @@ export function resolveRunExecutionPlan(input: {
   };
 }
 
-export function executeRunExecutionPlan(plan: RunExecutionPlan, cwd: string): SpawnSyncReturns<string> {
+export function executeRunExecutionPlan(plan: RunExecutionPlan, cwd: string): Promise<LaunchExecutionResult> {
   if (!plan.supported) {
     throw new Error(plan.reason ?? "unsupported run execution plan");
   }
-  if (plan.strategy === "stdin") {
-    return spawnSync(plan.command, plan.args, {
-      cwd,
-      stdio: ["pipe", "inherit", "inherit"],
-      input: `${plan.prompt}\n`,
-      encoding: "utf8"
-    });
-  }
-  return spawnSync(plan.command, plan.args, {
+  return spawnAsync(plan.command, plan.args, {
     cwd,
-    stdio: "inherit",
-    encoding: "utf8"
+    runMode: plan.strategy === "stdin",
+    prompt: plan.prompt
   });
 }
 
@@ -248,4 +257,3 @@ export function assertRunModeSupported(target: ExportTarget, runMode: boolean): 
     throw new Error(plan.reason ?? `Target '${target}' cannot run in --run mode.`);
   }
 }
-

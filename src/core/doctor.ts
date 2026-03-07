@@ -1,5 +1,5 @@
 import path from "node:path";
-import { fileExists, loadOpenTeamConfig, loadTeamConfig } from "./config";
+import { fileExists, loadOpenTeamConfig, loadTeamConfig, resolveHomeOpenTeamConfigPath } from "./config";
 import { validateTeamConfig } from "./validate";
 import { describeProviderAuth } from "./model-providers";
 import { ExportTarget, normalizeExportTarget } from "./targets";
@@ -16,7 +16,7 @@ function providerFromModel(model: string): string {
   return model.split(":")[0] ?? "";
 }
 
-export function runDoctor(teamPath = "team.yaml", openTeamPath = "openteam.yaml", target?: string): DoctorCheck[] {
+export function runDoctor(teamPath = "team.yaml", openTeamPath = resolveHomeOpenTeamConfigPath(), target?: string): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
 
   checks.push({
@@ -26,7 +26,7 @@ export function runDoctor(teamPath = "team.yaml", openTeamPath = "openteam.yaml"
   });
 
   checks.push({
-    name: "openteam.yaml exists",
+    name: "OpenTeam config exists",
     status: fileExists(openTeamPath) ? "ok" : "warn",
     detail: path.resolve(openTeamPath)
   });
@@ -43,6 +43,13 @@ export function runDoctor(teamPath = "team.yaml", openTeamPath = "openteam.yaml"
       status: validation.valid ? "ok" : "fail",
       detail: validation.valid ? "schema valid" : validation.errors.join("; ")
     });
+    if (validation.valid && validation.warnings.length > 0) {
+      checks.push({
+        name: "team.yaml strictness",
+        status: "warn",
+        detail: validation.warnings.join("; ")
+      });
+    }
 
     const models = new Set<string>();
     for (const manager of teamConfig.control_plane.manager_agents) {
@@ -133,7 +140,7 @@ export function runDoctor(teamPath = "team.yaml", openTeamPath = "openteam.yaml"
       });
     } catch (error) {
       checks.push({
-        name: "openteam.yaml parse",
+        name: "OpenTeam config parse",
         status: "fail",
         detail: error instanceof Error ? error.message : String(error)
       });

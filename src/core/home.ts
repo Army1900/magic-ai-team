@@ -23,10 +23,15 @@ export function ensureOpenTeamHome(): string {
 }
 
 export function teamSlug(name: string): string {
-  return name
+  const base = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+  if (base.length > 0) {
+    return base;
+  }
+  const hex = Buffer.from(name.trim() || "team", "utf8").toString("hex").slice(0, 12);
+  return `team-${hex}`;
 }
 
 export function getTeamDirByName(name: string): string {

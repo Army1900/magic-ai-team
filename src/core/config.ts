@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import YAML from "yaml";
 import { OpenTeamConfig, TeamConfig } from "./types";
+import { getOpenTeamHome } from "./home";
 
 export function readYamlFile<T>(filePath: string): T {
   const fullPath = path.resolve(filePath);
@@ -23,10 +24,17 @@ export function ensureDir(dirPath: string): void {
   fs.mkdirSync(path.resolve(dirPath), { recursive: true });
 }
 
+export function resolveHomeOpenTeamConfigPath(): string {
+  return path.resolve(getOpenTeamHome(), "openteam.yaml");
+}
+
 export function loadTeamConfig(filePath = "team.yaml"): TeamConfig {
   return readYamlFile<TeamConfig>(filePath);
 }
 
-export function loadOpenTeamConfig(filePath = "openteam.yaml"): OpenTeamConfig {
-  return readYamlFile<OpenTeamConfig>(filePath);
+export function loadOpenTeamConfig(filePath?: string): OpenTeamConfig {
+  if (filePath) {
+    return readYamlFile<OpenTeamConfig>(path.resolve(filePath));
+  }
+  return readYamlFile<OpenTeamConfig>(resolveHomeOpenTeamConfigPath());
 }

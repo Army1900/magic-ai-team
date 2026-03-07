@@ -17,7 +17,7 @@ export function suggestFixes(errorMessage: string): string[] {
   }
 
   if (msg.includes("args run strategy requires launchers")) {
-    fixes.push("Add launcher run args template in `openteam.yaml`, e.g. launchers.<target>.run.args_template.");
+    fixes.push("Add launcher run args template in `<OPENTEAM_HOME>/openteam.yaml`, e.g. launchers.<target>.run.args_template.");
   }
 
   if (msg.includes("no team file found")) {

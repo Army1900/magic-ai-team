@@ -18,6 +18,12 @@ export function registerValidateCommand(program: Command): void {
         const result = validateTeamConfig(config);
         if (result.valid) {
           success(`Config valid: ${filePath}`);
+          for (const warning of result.warnings) {
+            status("warn", warning);
+          }
+          if (result.warnings.length > 0) {
+            info(`Strict mode: ${result.strict_mode} (set OPENTEAM_SCHEMA_STRICT=fail to enforce)`);
+          }
           return;
         }
 

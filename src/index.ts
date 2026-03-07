@@ -21,12 +21,13 @@ import { registerExportCommand } from "./commands/export";
 import { registerStatusCommand } from "./commands/status";
 import { registerUpCommand } from "./commands/up";
 import { registerProviderCommand } from "./commands/provider";
-import { registerQuickstartCommand } from "./commands/quickstart";
 import { registerMonitorCommand } from "./commands/monitor";
 import { registerHandoffCommand } from "./commands/handoff";
 import { registerStartCommand } from "./commands/start";
 import { registerGoCommand } from "./commands/go";
 import { registerLauncherCommand } from "./commands/launcher";
+import { bootstrapRuntimeEnvironment } from "./core/bootstrap";
+import { applyDefaultGoArgs } from "./core/default-command";
 
 const program = new Command();
 
@@ -38,15 +39,16 @@ program
   .option("--no-color", "disable colored output");
 
 program.hook("preAction", () => {
+  bootstrapRuntimeEnvironment();
   const opts = program.opts<{ theme?: string; color?: boolean }>();
   let cfgTheme: string | undefined;
   let cfgColor: boolean | undefined;
   try {
-    const cfg = loadOpenTeamConfig("openteam.yaml");
+    const cfg = loadOpenTeamConfig();
     cfgTheme = cfg.ui?.theme;
     cfgColor = cfg.ui?.color;
   } catch {
-    // ignore missing or invalid openteam.yaml and rely on cli/default
+    // ignore missing or invalid OpenTeam config and rely on cli/default
   }
 
   setupUi({
@@ -74,14 +76,13 @@ registerExportCommand(program);
 registerStatusCommand(program);
 registerUpCommand(program);
 registerProviderCommand(program);
-registerQuickstartCommand(program);
 registerMonitorCommand(program);
 registerHandoffCommand(program);
 registerStartCommand(program);
 registerGoCommand(program);
 registerLauncherCommand(program);
 
-program.parseAsync(process.argv).catch((error) => {
+program.parseAsync(applyDefaultGoArgs(process.argv)).catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });

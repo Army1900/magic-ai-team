@@ -152,12 +152,13 @@ export function registerStartCommand(program: Command): void {
               runMode: false,
               prompt: handoff.prompt
             });
+        const executed = await finalExecution;
 
-        if (finalExecution.error) {
-          throw finalExecution.error;
+        if (executed.error) {
+          throw executed.error;
         }
 
-        const ok = finalExecution.status === 0;
+        const ok = executed.status === 0;
         appendWorklogEvent(projectPath, {
           type: "start",
           team: team.team.name,
@@ -165,14 +166,14 @@ export function registerStartCommand(program: Command): void {
           note: ok ? `team started in ${target}` : `team start failed in ${target}`,
           meta: {
             ...payload,
-            exit_code: finalExecution.status
+            exit_code: executed.status
           }
         });
         if (ok) {
           success("Team start command completed.");
         } else {
-          status("fail", "start", `exit_code=${finalExecution.status ?? -1}`);
-          process.exitCode = finalExecution.status ?? 1;
+          status("fail", "start", `exit_code=${executed.status ?? -1}`);
+          process.exitCode = executed.status ?? 1;
         }
       } catch (e) {
         reportCommandFailure({

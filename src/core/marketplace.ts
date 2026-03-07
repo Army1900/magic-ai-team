@@ -1,6 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import { ensureDir, fileExists, loadOpenTeamConfig, writeYamlFile } from "./config";
+import {
+  ensureDir,
+  fileExists,
+  loadOpenTeamConfig,
+  resolveHomeOpenTeamConfigPath,
+  writeYamlFile
+} from "./config";
 import { OpenTeamConfig } from "./types";
 
 const DEFAULT_CONFIG: OpenTeamConfig = {
@@ -47,15 +53,17 @@ const DEFAULT_CONFIG: OpenTeamConfig = {
   }
 };
 
-export function loadOrCreateOpenTeamConfig(configPath = "openteam.yaml"): OpenTeamConfig {
+export function loadOrCreateOpenTeamConfig(configPath = resolveHomeOpenTeamConfigPath()): OpenTeamConfig {
   if (!fileExists(configPath)) {
+    ensureDir(path.dirname(path.resolve(configPath)));
     writeYamlFile(configPath, DEFAULT_CONFIG);
     return DEFAULT_CONFIG;
   }
   return loadOpenTeamConfig(configPath);
 }
 
-export function saveOpenTeamConfig(config: OpenTeamConfig, configPath = "openteam.yaml"): void {
+export function saveOpenTeamConfig(config: OpenTeamConfig, configPath = resolveHomeOpenTeamConfigPath()): void {
+  ensureDir(path.dirname(path.resolve(configPath)));
   writeYamlFile(configPath, config);
 }
 
