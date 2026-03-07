@@ -15,6 +15,11 @@ const DEFAULT_CONFIG: OpenTeamConfig = {
     theme: "nord",
     color: true
   },
+  preferences: {
+    last_target: "claude",
+    last_no_start: false,
+    last_locale: "en"
+  },
   current_provider: "openai",
   providers: {
     openai: {

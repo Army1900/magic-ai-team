@@ -40,3 +40,19 @@ run("reportCommandFailure prints error, optional hint, and sets exit code", () =
     process.exitCode = prev;
   }
 });
+
+run("reportCommandFailure prints auto-fix with Fix now prefix", () => {
+  const infos: string[] = [];
+  const prev = process.exitCode;
+  try {
+    reportCommandFailure({
+      error: new Error("no team file found"),
+      errorFn: () => undefined,
+      infoFn: (m) => infos.push(m),
+      includeAutoFixes: true
+    });
+    assert.equal(infos.some((m) => m.startsWith("Fix now: ")), true);
+  } finally {
+    process.exitCode = prev;
+  }
+});

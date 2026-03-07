@@ -103,6 +103,11 @@ export interface OpenTeamConfig {
     theme?: string;
     color?: boolean;
   };
+  preferences?: {
+    last_target?: string;
+    last_no_start?: boolean;
+    last_locale?: "en" | "zh" | string;
+  };
   current_provider?: "openai" | "anthropic" | string;
   providers?: {
     openai?: {

@@ -20,6 +20,8 @@ OpenTeam is not another single-agent runner. It is a Team OS layer on top of tar
 - Export self-check and team quality audit.
 - Project worklog with cost/token/latency metrics.
 - Recovery checkpoint with `go --resume`.
+- One-time high-risk bypass in `go` interactive mode (continue once, no global config change).
+- Preference memory (`last_target`, `last_no_start`, `last_locale`) for smoother next runs.
 
 ## Safety Defaults
 
@@ -27,6 +29,7 @@ Default behavior is conservative:
 
 - High-risk findings are blocked by default in `go` and `export`.
 - To continue anyway, pass `--ignore-high-risk`.
+- In interactive `go`, high-risk-only blocks can be bypassed once after confirmation.
 - Export still runs policy gate, target compatibility gate, target validation, and self-check.
 
 ## Prerequisites
@@ -81,6 +84,19 @@ openteam go --resume
 - phases: `up`, `export`, `handoff`, `start`
 - states: `queued`, `running`, `done`, `fallback`, `failed`
 
+`go` UX includes:
+
+- stage hints: `eta~...`, `doing=...`, `next=...`
+- final `Go Summary` card with readiness, quality/risk counts, phase timings
+- `Fix now:` one-line actionable commands
+
+`go --json` also includes:
+
+- `summary.ready_to_start`
+- `summary.quality_overall`
+- `summary.top_issues[]`
+- `summary.quick_fixes[]`
+
 ### Up (guided team creation)
 
 ```bash
@@ -88,6 +104,11 @@ openteam up
 openteam up --name "My Team" --goal "Improve QA and release safety" --target openclaw
 openteam up --non-interactive --allow-mock
 ```
+
+Guided `up` now reduces one mandatory question round:
+
+- `priority` and `human_loop` are auto-inferred by default.
+- user can enter advanced tuning only when needed.
 
 ### Run / Evaluate / Optimize
 
@@ -131,9 +152,9 @@ OpenTeam quality audit includes:
 
 Scanner integration in current version:
 
-- Detects tool availability (`gitleaks`, `semgrep`, `trivy`)
-- Reports status in quality output
-- Deep scanning command execution is reserved for next stage
+- Runs real scans when tools are available (`gitleaks`, `semgrep`, `trivy`)
+- Converts scanner findings into `warn/fail` quality findings
+- Keeps missing-tool cases as non-blocking warnings
 
 ## Resource Recommendation Feedback Loop
 
@@ -230,4 +251,4 @@ Report includes:
 - `openteam up`/`go` require AI by default; use `--allow-mock` only for explicit offline fallback.
 - Use `openteam provider test --provider <openai|anthropic>` to check connectivity.
 - High-risk bypass must be explicit: `--ignore-high-risk`.
-
+- `go` stores last-used preferences in `<OPENTEAM_HOME>/openteam.yaml` and reuses them on the next run unless CLI args override.

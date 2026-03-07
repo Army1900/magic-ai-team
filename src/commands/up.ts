@@ -589,18 +589,8 @@ async function collectDiscovery(options: {
     ],
     defaultTarget
   );
-  const priority = await askChoice(
-    `5) ${say(locale, "Optimization priority:", "优化优先级:")}`,
-    [
-      { key: "1", label: choiceLabel(locale, "Balanced (recommended)", "均衡（推荐）"), value: "balanced" },
-      { key: "2", label: choiceLabel(locale, "Quality first", "质量优先"), value: "quality" },
-      { key: "3", label: choiceLabel(locale, "Speed first", "速度优先"), value: "speed" },
-      { key: "4", label: choiceLabel(locale, "Cost first", "成本优先"), value: "cost" }
-    ],
-    defaultPriority
-  );
   const constraints = await askTemplateText(
-    "6",
+    "5",
     say(locale, "Choose constraints:", "选择约束条件:"),
     [
       { key: "1", label: choiceLabel(locale, "No special constraints", "无特殊约束"), value: "No special constraints" },
@@ -610,15 +600,57 @@ async function collectDiscovery(options: {
     ],
     defaultConstraints
   );
-  const humanLoop = await askChoice(
-    `7) ${say(locale, "Human approval level:", "人工审批级别:")}`,
-    [
-      { key: "1", label: choiceLabel(locale, "Medium (recommended)", "中（推荐）"), value: "medium" },
-      { key: "2", label: choiceLabel(locale, "High (stricter review)", "高（更严格审核）"), value: "high" },
-      { key: "3", label: choiceLabel(locale, "Low (faster automation)", "低（更快自动化）"), value: "low" }
-    ],
-    defaultHuman
-  );
+  const inferPriorityAndHumanLoop = (): { priority: Priority; humanLoop: HumanLoop } => {
+    const text = `${problem} ${outcome} ${constraints}`.toLowerCase();
+    const inferredPriority: Priority = text.includes("budget") || text.includes("cost")
+      ? "cost"
+      : text.includes("speed") || text.includes("response")
+      ? "speed"
+      : text.includes("quality") || text.includes("defect") || text.includes("safety")
+      ? "quality"
+      : defaultPriority;
+    const inferredHuman: HumanLoop = text.includes("privacy") || text.includes("compliance") || text.includes("strict")
+      ? "high"
+      : text.includes("automation") || text.includes("faster")
+      ? "low"
+      : defaultHuman;
+    return { priority: inferredPriority, humanLoop: inferredHuman };
+  };
+  const inferred = inferPriorityAndHumanLoop();
+  const advanced = (await rl.question(`6) ${say(locale, "Need advanced tuning for priority/approval? [y/N]: ", "是否进行高级调整（优先级/审批）? [y/N]: ")}`))
+    .trim()
+    .toLowerCase();
+  let priority: Priority = inferred.priority;
+  let humanLoop: HumanLoop = inferred.humanLoop;
+  if (advanced === "y" || advanced === "yes") {
+    priority = await askChoice(
+      `7) ${say(locale, "Optimization priority:", "优化优先级:")}`,
+      [
+        { key: "1", label: choiceLabel(locale, "Balanced (recommended)", "均衡（推荐）"), value: "balanced" },
+        { key: "2", label: choiceLabel(locale, "Quality first", "质量优先"), value: "quality" },
+        { key: "3", label: choiceLabel(locale, "Speed first", "速度优先"), value: "speed" },
+        { key: "4", label: choiceLabel(locale, "Cost first", "成本优先"), value: "cost" }
+      ],
+      inferred.priority
+    );
+    humanLoop = await askChoice(
+      `8) ${say(locale, "Human approval level:", "人工审批级别:")}`,
+      [
+        { key: "1", label: choiceLabel(locale, "Medium (recommended)", "中（推荐）"), value: "medium" },
+        { key: "2", label: choiceLabel(locale, "High (stricter review)", "高（更严格审核）"), value: "high" },
+        { key: "3", label: choiceLabel(locale, "Low (faster automation)", "低（更快自动化）"), value: "low" }
+      ],
+      inferred.humanLoop
+    );
+  } else {
+    info(
+      say(
+        locale,
+        `   Auto inferred: priority=${priority}, human_loop=${humanLoop}`,
+        `   已自动推断: priority=${priority}, human_loop=${humanLoop}`
+      )
+    );
+  }
   rl.close();
 
   return {

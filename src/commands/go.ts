@@ -24,6 +24,8 @@ import { failurePayload, successPayload, toJsonString } from "../core/json-outpu
 import { initGoRecovery, loadGoRecoveryAsync, saveGoRecoveryAsync } from "../core/go-recovery";
 import { runExportSelfCheck } from "../core/export-selfcheck";
 import { applyHighRiskOverride, evaluateTeamQuality } from "../core/team-quality";
+import { suggestFixes } from "../core/self-heal";
+import { loadOrCreateOpenTeamConfig, saveOpenTeamConfig } from "../core/marketplace";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -50,6 +52,64 @@ function phaseStatusKind(state: PhaseState): "ok" | "warn" | "fail" {
   if (state === "done") return "ok";
   if (state === "failed") return "fail";
   return "warn";
+}
+
+function phaseEtaMs(phase: GoPhase): number {
+  return phase === "up" ? 12000 : phase === "export" ? 9000 : phase === "handoff" ? 1500 : 4000;
+}
+
+function phaseNext(phase: GoPhase): string {
+  return phase === "up"
+    ? "export"
+    : phase === "export"
+    ? "handoff"
+    : phase === "handoff"
+    ? "start"
+    : "monitor";
+}
+
+function phaseAction(phase: GoPhase): string {
+  return phase === "up"
+    ? "collecting discovery and generating team topology"
+    : phase === "export"
+    ? "running quality gates and exporting target artifacts"
+    : phase === "handoff"
+    ? "building TEAM_BRIEF and START_PROMPT"
+    : "checking launcher and starting target tool";
+}
+
+function hasCjkText(input: string): boolean {
+  return /[\u3400-\u9FFF]/.test(input || "");
+}
+
+type InteractionLocale = "en" | "zh";
+
+function resolveLocale(seed?: string): InteractionLocale {
+  if (hasCjkText(seed || "")) return "zh";
+  const lang = (process.env.LANG ?? process.env.LC_ALL ?? process.env.LANGUAGE ?? "").toLowerCase();
+  if (lang.startsWith("zh")) return "zh";
+  return "en";
+}
+
+function say(locale: InteractionLocale, en: string, zh: string): string {
+  return locale === "zh" ? zh : en;
+}
+
+function fixForFindingCode(code: string, projectPath: string, target: string): string | null {
+  if (code.includes("HIGH_RISK_")) return "openteam go --ignore-high-risk";
+  if (code.includes("SCANNER_GITLEAKS")) return `gitleaks detect --source ${projectPath}`;
+  if (code.includes("SCANNER_SEMGREP")) return `semgrep scan --config auto ${projectPath}`;
+  if (code.includes("SCANNER_TRIVY")) return `trivy fs --severity HIGH,CRITICAL ${projectPath}`;
+  if (code.includes("LAUNCHER_MISSING")) return "openteam launcher check";
+  if (code.includes("TARGET_")) return `openteam export --target ${target} --out ${projectPath} --strict-target`;
+  return null;
+}
+
+async function confirmContinueOnce(message: string): Promise<boolean> {
+  const rl = readline.createInterface({ input, output });
+  const answer = (await rl.question(`${message} [y/N]: `)).trim().toLowerCase();
+  rl.close();
+  return answer === "y" || answer === "yes";
 }
 
 export function registerGoCommand(program: Command): void {
@@ -80,11 +140,13 @@ export function registerGoCommand(program: Command): void {
       let recoveryPath = "";
       let recovery = await loadGoRecoveryAsync();
       try {
+        const cfg = loadOrCreateOpenTeamConfig();
+        const locale = resolveLocale(`${options.name ?? ""} ${options.goal ?? ""} ${cfg.preferences?.last_locale ?? ""}`);
         const resumeMode = Boolean(options.resume);
         const targetInput =
           resumeMode && recovery && !hasCliFlag("--target")
             ? recovery.options.target
-            : options.target ?? recovery?.options.target ?? "claude";
+            : options.target ?? recovery?.options.target ?? cfg.preferences?.last_target ?? "claude";
         const projectInput =
           resumeMode && recovery && !hasCliFlag("--project")
             ? recovery.options.project
@@ -96,7 +158,9 @@ export function registerGoCommand(program: Command): void {
         const shouldStartInput =
           resumeMode && recovery && !hasCliFlag("--no-start")
             ? recovery.options.should_start
-            : Boolean(options.start);
+            : hasCliFlag("--no-start")
+            ? false
+            : !Boolean(cfg.preferences?.last_no_start) && Boolean(options.start);
 
         const target = normalizeExportTarget(targetInput);
         const projectPath = String(projectInput);
@@ -124,7 +188,14 @@ export function registerGoCommand(program: Command): void {
           });
           if (!options.json) {
             const elapsed = elapsedMs !== undefined ? ` elapsed=${elapsedMs}ms` : "";
-            status(phaseStatusKind(state), `phase:${phase}`, `${state}${elapsed}${detail ? ` | ${detail}` : ""}`);
+            const eta = state === "running" ? ` eta~${phaseEtaMs(phase)}ms` : "";
+            const next = state === "running" || state === "done" || state === "fallback" ? ` next=${phaseNext(phase)}` : "";
+            const doing = state === "running" ? ` doing=${phaseAction(phase)}` : "";
+            status(
+              phaseStatusKind(state),
+              `phase:${phase}`,
+              `${state}${elapsed}${eta}${next}${doing}${detail ? ` | ${detail}` : ""}`
+            );
           }
         };
         for (const phase of phaseOrder) {
@@ -208,8 +279,23 @@ export function registerGoCommand(program: Command): void {
 
         const team = loadTeamConfig(String(upResult.team_file));
         const quality = evaluateTeamQuality(team, { projectPath, includeScanners: true });
-        const qualityFindings = applyHighRiskOverride(quality.findings, ignoreHighRisk);
-        const qualityFails = qualityFindings.filter((f) => f.severity === "fail");
+        let qualityFindings = applyHighRiskOverride(quality.findings, ignoreHighRisk);
+        let qualityFails = qualityFindings.filter((f) => f.severity === "fail");
+        const onlyHighRiskFails = qualityFails.length > 0 && qualityFails.every((f) => f.code.startsWith("HIGH_RISK_"));
+        if (!options.json && !ignoreHighRisk && onlyHighRiskFails) {
+          const goOn = await confirmContinueOnce(
+            say(
+              locale,
+              "High-risk gate blocked this run. Continue once by ignoring high-risk findings?",
+              "本次被高风险门禁拦截。是否仅本次忽略高风险并继续？"
+            )
+          );
+          if (goOn) {
+            qualityFindings = applyHighRiskOverride(quality.findings, true);
+            qualityFails = qualityFindings.filter((f) => f.severity === "fail");
+            markPhase("export", "fallback", "high-risk ignored for this run only");
+          }
+        }
         if (qualityFails.length > 0) {
           markPhase("export", "failed", "team quality gate blocked");
           if (options.json) {
@@ -228,7 +314,7 @@ export function registerGoCommand(program: Command): void {
             process.exitCode = 1;
             return;
           }
-          error("Go blocked by team quality gate before export.");
+          error(say(locale, "Go blocked by team quality gate before export.", "Go 在导出前被团队质量门禁阻断。"));
           for (const finding of qualityFindings) {
             status(finding.severity, finding.code, finding.message);
           }
@@ -254,8 +340,20 @@ export function registerGoCommand(program: Command): void {
           ? getLauncherHealth(effectiveTarget, options.toolCmd ? String(options.toolCmd) : undefined)
           : null;
         if (preflight && !preflight.available && !options.json) {
-          warn(`Launcher precheck: command not found for ${effectiveTarget} -> ${preflight.command}`);
-          info("Start phase may be skipped unless you install the tool or pass --tool-cmd.");
+          warn(
+            say(
+              locale,
+              `Launcher precheck: command not found for ${effectiveTarget} -> ${preflight.command}`,
+              `启动器预检: 未找到 ${effectiveTarget} 的命令 -> ${preflight.command}`
+            )
+          );
+          info(
+            say(
+              locale,
+              "Start phase may be skipped unless you install the tool or pass --tool-cmd.",
+              "若未安装目标工具或未传 --tool-cmd，start 阶段可能会被跳过。"
+            )
+          );
         }
 
         const policy = evaluatePolicies(team);
@@ -276,7 +374,7 @@ export function registerGoCommand(program: Command): void {
             process.exitCode = 1;
             return;
           }
-          error("Go blocked by policy gate before export.");
+          error(say(locale, "Go blocked by policy gate before export.", "Go 在导出前被策略门禁阻断。"));
           for (const finding of policy.findings) {
             status(finding.severity, finding.code, finding.message);
           }
@@ -307,7 +405,13 @@ export function registerGoCommand(program: Command): void {
             process.exitCode = 1;
             return;
           }
-          error(`Go blocked by ${effectiveTarget} compatibility gate before export.`);
+          error(
+            say(
+              locale,
+              `Go blocked by ${effectiveTarget} compatibility gate before export.`,
+              `Go 在导出前被 ${effectiveTarget} 兼容性门禁阻断。`
+            )
+          );
           for (const finding of compatibility.findings) {
             status(finding.severity, finding.code, finding.message);
           }
@@ -344,7 +448,13 @@ export function registerGoCommand(program: Command): void {
               process.exitCode = 1;
               return;
             }
-            error(`Go blocked by ${effectiveTarget} target validation.`);
+            error(
+              say(
+                locale,
+                `Go blocked by ${effectiveTarget} target validation.`,
+                `Go 被 ${effectiveTarget} 目标校验阻断。`
+              )
+            );
             for (const finding of targetValidation.findings) {
               status(finding.severity, finding.code, finding.message);
             }
@@ -374,7 +484,13 @@ export function registerGoCommand(program: Command): void {
               process.exitCode = 1;
               return;
             }
-            error(`Go blocked by ${effectiveTarget} export self-check.`);
+            error(
+              say(
+                locale,
+                `Go blocked by ${effectiveTarget} export self-check.`,
+                `Go 被 ${effectiveTarget} 导出自检阻断。`
+              )
+            );
             for (const finding of selfCheck.findings) {
               status(finding.severity === "ok" ? "ok" : finding.severity, finding.code, finding.message);
             }
@@ -444,11 +560,17 @@ export function registerGoCommand(program: Command): void {
           if (!autoYes) {
             const ok = await confirmStart(`Start team in ${projectPath} using ${toolSpec.command}?`);
             if (!ok) {
-              warn("Start skipped by user confirmation.");
+              warn(say(locale, "Start skipped by user confirmation.", "根据你的确认已跳过 start。"));
               markPhase("start", "fallback", "skipped by confirmation");
             } else if (!commandExists(toolSpec.command)) {
-              warn(`Tool command not found: ${toolSpec.command}`);
-              info(`Use --tool-cmd to override. Example: openteam go --project ${projectPath} --tool-cmd "claude"`);
+              warn(say(locale, `Tool command not found: ${toolSpec.command}`, `未找到工具命令: ${toolSpec.command}`));
+              info(
+                say(
+                  locale,
+                  `Use --tool-cmd to override. Example: openteam go --project ${projectPath} --tool-cmd "claude"`,
+                  `可用 --tool-cmd 覆盖命令。例如: openteam go --project ${projectPath} --tool-cmd "claude"`
+                )
+              );
               markPhase("start", "fallback", "launcher missing");
             } else {
               const execution = runInput
@@ -490,7 +612,7 @@ export function registerGoCommand(program: Command): void {
               markPhase("start", started ? "done" : "failed", `exit_code=${startExitCode ?? -1}`);
             }
           } else if (!commandExists(toolSpec.command)) {
-            warn(`Tool command not found: ${toolSpec.command}`);
+            warn(say(locale, `Tool command not found: ${toolSpec.command}`, `未找到工具命令: ${toolSpec.command}`));
             markPhase("start", "fallback", "launcher missing");
           } else {
             const execution = runInput
@@ -537,6 +659,21 @@ export function registerGoCommand(program: Command): void {
 
         recovery.status = "completed";
         await saveGoRecoveryAsync(recovery);
+        const qualityWarns = qualityFindings.filter((f) => f.severity === "warn");
+        const scannerWarns = quality.scanner_summary.filter((s) => s.status === "warn");
+        const scannerFails = quality.scanner_summary.filter((s) => s.status === "fail");
+        const readyToStart = Boolean(preflight?.available ?? true) && qualityFindings.every((f) => f.severity !== "fail");
+        const topIssues = [
+          ...qualityWarns.map((f) => ({ code: f.code, message: f.message })),
+          ...scannerWarns.map((s) => ({ code: `SCANNER_${s.tool.toUpperCase()}_WARN`, message: `${s.tool}: ${s.detail}` })),
+          ...scannerFails.map((s) => ({ code: `SCANNER_${s.tool.toUpperCase()}_FAIL`, message: `${s.tool}: ${s.detail}` }))
+        ].slice(0, 3);
+        const quickFixes = [
+          ...topIssues
+            .map((i) => fixForFindingCode(i.code, projectPath, effectiveTarget))
+            .filter((x): x is string => Boolean(x)),
+          ...suggestFixes(topIssues.map((i) => i.message).join(" | "))
+        ].filter((x, idx, arr) => arr.indexOf(x) === idx).slice(0, 3);
 
         const payload = successPayload({
           team_slug: String(upResult.team_slug),
@@ -548,6 +685,20 @@ export function registerGoCommand(program: Command): void {
           handoff_paths: handoffPaths ?? undefined,
           phase_timeline: phaseTimeline,
           quality: { ...quality, findings: qualityFindings },
+          summary: {
+            ready_to_start: readyToStart,
+            quality_overall: quality.scores.overall,
+            quality_warns: qualityWarns.length,
+            scanner_warns: scannerWarns.length,
+            scanner_fails: scannerFails.length,
+            changes: {
+              agents: team.execution_plane.agents.length,
+              skills: team.resources.skills.length,
+              mcps: team.resources.mcps.length
+            },
+            top_issues: topIssues,
+            quick_fixes: quickFixes
+          },
           started,
           start_exit_code: startExitCode,
           recovery: recoveryPath
@@ -557,7 +708,7 @@ export function registerGoCommand(program: Command): void {
           return;
         }
 
-        banner("Go Complete", effectiveTarget);
+        banner(say(locale, "Go Complete", "Go 完成"), effectiveTarget);
         kv("team_slug", String(upResult.team_slug));
         kv("project", projectPath);
         kv("manifest", manifest);
@@ -568,11 +719,50 @@ export function registerGoCommand(program: Command): void {
             kv("start_exit_code", startExitCode);
           }
         } else {
-          info("Start skipped by --no-start.");
-          info(`Next: openteam start --project ${projectPath}`);
+          info(say(locale, "Start skipped by --no-start.", "根据 --no-start 已跳过 start。"));
+          info(say(locale, `Next: openteam start --project ${projectPath}`, `下一步: openteam start --project ${projectPath}`));
         }
-        info(`Monitor: openteam monitor report --project ${projectPath} --since 24h --write`);
-        success("Go flow finished.");
+        banner(say(locale, "Go Summary", "Go 摘要"), String(upResult.team_slug));
+        kv("ready_to_start", readyToStart);
+        kv("quality_overall", quality.scores.overall);
+        kv("quality_warns", qualityWarns.length);
+        kv("scanner_warns", scannerWarns.length);
+        kv("scanner_fails", scannerFails.length);
+        kv("agents", team.execution_plane.agents.length);
+        kv("skills", team.resources.skills.length);
+        kv("mcps", team.resources.mcps.length);
+        for (const phase of phaseOrder) {
+          const doneEvent = [...phaseTimeline].reverse().find((e) => e.phase === phase && e.elapsed_ms !== undefined);
+          if (doneEvent?.elapsed_ms !== undefined) {
+            kv(`phase_${phase}_ms`, doneEvent.elapsed_ms);
+          }
+        }
+        if (topIssues.length > 0) {
+          info(say(locale, "Top issues:", "主要问题:"));
+          for (const issue of topIssues) {
+            status("warn", issue.code, issue.message);
+          }
+        }
+        if (quickFixes.length > 0) {
+          for (const fix of quickFixes) {
+            info(`Fix now: ${fix}`);
+          }
+        }
+        info(
+          say(
+            locale,
+            `Next: openteam monitor report --project ${projectPath} --since 24h --write`,
+            `下一步: openteam monitor report --project ${projectPath} --since 24h --write`
+          )
+        );
+        success(say(locale, "Go flow finished.", "Go 流程已完成。"));
+        cfg.preferences = {
+          ...(cfg.preferences ?? {}),
+          last_target: effectiveTarget,
+          last_no_start: !shouldStart,
+          last_locale: locale
+        };
+        saveOpenTeamConfig(cfg);
       } catch (e) {
         if (recovery) {
           recovery.status = "failed";

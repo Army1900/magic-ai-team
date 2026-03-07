@@ -23,7 +23,7 @@ export function reportCommandFailure(options: {
   if (options.includeAutoFixes !== false && options.infoFn) {
     const fixes = suggestFixes(message);
     for (const fix of fixes.slice(0, 3)) {
-      options.infoFn(`Fix: ${fix}`);
+      options.infoFn(`Fix now: ${fix}`);
     }
   }
   process.exitCode = options.exitCode ?? 1;
