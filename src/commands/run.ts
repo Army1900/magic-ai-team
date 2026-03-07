@@ -7,6 +7,7 @@ import { resolveTeamFileOrThrow } from "../core/current-team";
 import { appendWorklogEvent } from "../core/worklog";
 import { consumeResourceFeedbackWarning, recordRunResourceFeedback } from "../core/resource-feedback";
 import { evaluateAgentQuality } from "../core/agent-quality";
+import { resolveLocale, t } from "../core/i18n";
 
 export function registerRunCommand(program: Command): void {
   program
@@ -24,6 +25,7 @@ export function registerRunCommand(program: Command): void {
         const teamFile = resolveTeamFileOrThrow({ file: options.file, team: options.team });
         const team = loadTeamConfig(teamFile);
         const projectPath = options.project ?? ".";
+        const locale = resolveLocale(`${team.team.name} ${options.task ?? ""}`);
         if (options.policyGate !== false) {
           const policy = evaluatePolicies(team);
           const fails = policy.findings.filter((f) => f.severity === "fail");
@@ -43,7 +45,7 @@ export function registerRunCommand(program: Command): void {
               process.exitCode = 1;
               return;
             }
-            error("Run blocked by policy gate:");
+            error(t(locale, "run_blocked_policy"));
             for (const finding of fails) {
               status("fail", finding.code, finding.message);
             }

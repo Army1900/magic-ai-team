@@ -26,6 +26,8 @@ import { registerHandoffCommand } from "./commands/handoff";
 import { registerStartCommand } from "./commands/start";
 import { registerGoCommand } from "./commands/go";
 import { registerLauncherCommand } from "./commands/launcher";
+import { registerHistoryCommand } from "./commands/history";
+import { registerViewerCommand } from "./commands/viewer";
 import { bootstrapRuntimeEnvironment } from "./core/bootstrap";
 import { applyDefaultGoArgs } from "./core/default-command";
 
@@ -81,6 +83,8 @@ registerHandoffCommand(program);
 registerStartCommand(program);
 registerGoCommand(program);
 registerLauncherCommand(program);
+registerHistoryCommand(program);
+registerViewerCommand(program);
 
 program.parseAsync(applyDefaultGoArgs(process.argv)).catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));

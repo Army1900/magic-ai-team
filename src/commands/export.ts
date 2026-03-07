@@ -13,6 +13,7 @@ import { reportCommandFailure } from "../core/command-errors";
 import { failurePayload, successPayload, toJsonString } from "../core/json-output";
 import { runExportSelfCheck } from "../core/export-selfcheck";
 import { applyHighRiskOverride, evaluateTeamQuality } from "../core/team-quality";
+import { resolveLocale, t } from "../core/i18n";
 
 function resolveTeamFileFromOptions(options: { team?: string; file?: string }): string {
   return resolveTeamFileOrThrow(options);
@@ -38,6 +39,7 @@ export function registerExportCommand(program: Command): void {
         const teamFile = resolveTeamFileFromOptions(options);
         const target = normalizeExportTarget(options.target);
         const team = loadTeamConfig(teamFile);
+        const locale = resolveLocale(`${team.team.name} ${target}`);
 
         const strict = Boolean(options.strict);
         const skipPolicyGate = Boolean(options.skipPolicyGate);
@@ -57,7 +59,7 @@ export function registerExportCommand(program: Command): void {
             process.exitCode = 1;
             return;
           }
-          error("Export blocked by team quality gate.");
+          error(t(locale, "export_blocked_quality"));
           for (const finding of qualityFindings) {
             status(finding.severity, finding.code, finding.message);
           }

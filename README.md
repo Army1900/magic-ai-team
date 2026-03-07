@@ -77,6 +77,8 @@ openteam go --project D:\Projects\my-app --target claude --no-start
 openteam go --project D:\Projects\my-app --target codex --json
 openteam go --project D:\Projects\my-app --view advanced
 openteam go --resume
+openteam history --limit 20
+openteam viewer --project D:\Projects\my-app
 ```
 
 `go --json` includes structured phase timeline:
@@ -98,6 +100,26 @@ openteam go --resume
 - `summary.quality_overall`
 - `summary.top_issues[]`
 - `summary.quick_fixes[]`
+
+### History
+
+```bash
+openteam history
+openteam history --limit 50
+openteam history --json
+```
+
+Shows recent `go` records with status/target/team/recovery/error.
+
+### Viewer (Static Web)
+
+```bash
+openteam viewer --project D:\Projects\my-app
+openteam viewer --project D:\Projects\my-app --out D:\Projects\my-app\.openteam\viewer\index.html
+openteam viewer --project D:\Projects\my-app --json
+```
+
+Generates a static HTML viewer from `.openteam/worklog` + export manifest.
 
 ### Up (guided team creation)
 

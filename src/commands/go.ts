@@ -27,6 +27,8 @@ import { applyHighRiskOverride, evaluateTeamQuality } from "../core/team-quality
 import { suggestFixes } from "../core/self-heal";
 import { loadOrCreateOpenTeamConfig, saveOpenTeamConfig } from "../core/marketplace";
 import { buildGoSummary, GoPhase, GoPhaseEvent, PhaseState } from "../core/go-summary";
+import { appendGoHistory } from "../core/go-history";
+import { Locale, resolveLocale, t } from "../core/i18n";
 
 async function confirmStart(message: string): Promise<boolean> {
   const rl = readline.createInterface({ input, output });
@@ -69,20 +71,7 @@ function phaseAction(phase: GoPhase): string {
     : "checking launcher and starting target tool";
 }
 
-function hasCjkText(input: string): boolean {
-  return /[\u3400-\u9FFF]/.test(input || "");
-}
-
-type InteractionLocale = "en" | "zh";
-
-function resolveLocale(seed?: string): InteractionLocale {
-  if (hasCjkText(seed || "")) return "zh";
-  const lang = (process.env.LANG ?? process.env.LC_ALL ?? process.env.LANGUAGE ?? "").toLowerCase();
-  if (lang.startsWith("zh")) return "zh";
-  return "en";
-}
-
-function say(locale: InteractionLocale, en: string, zh: string): string {
+function say(locale: Locale, en: string, zh: string): string {
   return locale === "zh" ? zh : en;
 }
 
@@ -704,7 +693,7 @@ export function registerGoCommand(program: Command): void {
           return;
         }
 
-        banner(say(locale, "Go Complete", "Go 完成"), effectiveTarget);
+        banner(t(locale, "go_complete"), effectiveTarget);
         kv("team_slug", String(upResult.team_slug));
         kv("project", projectPath);
         kv("manifest", manifest);
@@ -718,7 +707,7 @@ export function registerGoCommand(program: Command): void {
           info(say(locale, "Start skipped by --no-start.", "根据 --no-start 已跳过 start。"));
           info(say(locale, `Next: openteam start --project ${projectPath}`, `下一步: openteam start --project ${projectPath}`));
         }
-        banner(say(locale, "Go Summary", "Go 摘要"), String(upResult.team_slug));
+        banner(t(locale, "go_summary"), String(upResult.team_slug));
         kv("ready_to_start", summary.ready_to_start);
         kv("quality_overall", summary.quality_overall);
         if (viewMode === "advanced") {
@@ -735,7 +724,7 @@ export function registerGoCommand(program: Command): void {
             }
           }
           if (summary.top_issues.length > 0) {
-            info(say(locale, "Top issues:", "主要问题:"));
+            info(t(locale, "go_top_issues"));
             for (const issue of summary.top_issues) {
               status("warn", issue.code, issue.message);
             }
@@ -747,13 +736,22 @@ export function registerGoCommand(program: Command): void {
           }
         }
         info(
-          say(
-            locale,
-            `Next: openteam monitor report --project ${projectPath} --since 24h --write`,
-            `下一步: openteam monitor report --project ${projectPath} --since 24h --write`
-          )
+          t(locale, "go_next_monitor", { project: projectPath })
         );
-        success(say(locale, "Go flow finished.", "Go 流程已完成。"));
+        success(t(locale, "go_finished"));
+        appendGoHistory({
+          status: "ok",
+          target: effectiveTarget,
+          project: projectPath,
+          team_slug: String(upResult.team_slug),
+          team_file: String(upResult.team_file),
+          recovery: recoveryPath,
+          summary: {
+            ready_to_start: summary.ready_to_start,
+            quality_overall: summary.quality_overall,
+            top_issue_codes: summary.top_issues.map((x) => x.code)
+          }
+        });
         cfg.preferences = {
           ...(cfg.preferences ?? {}),
           last_target: effectiveTarget,
@@ -762,11 +760,22 @@ export function registerGoCommand(program: Command): void {
         };
         saveOpenTeamConfig(cfg);
       } catch (e) {
+        const targetMaybe = options?.target ? String(options.target) : undefined;
+        const projectMaybe = options?.project ? String(options.project) : undefined;
         if (recovery) {
           recovery.status = "failed";
           recovery.last_error = toErrorMessage(e);
           await saveGoRecoveryAsync(recovery);
         }
+        appendGoHistory({
+          status: "fail",
+          target: targetMaybe,
+          project: projectMaybe,
+          team_slug: recovery?.artifacts.team_slug,
+          team_file: recovery?.artifacts.team_file,
+          recovery: recoveryPath || undefined,
+          error: toErrorMessage(e)
+        });
         if (options.json) {
           console.log(
             toJsonString(
